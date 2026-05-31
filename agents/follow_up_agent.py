@@ -3,9 +3,9 @@ Follow-up Agent
 
 Handles outbound follow-up messages:
 
-- reminder_24h       → reminder sent the day before a booking
-- post_service_feedback → sent after the session to collect feedback
-- rebooking_prompt   → gentle nudge to rebook (e.g. 3 weeks after last session)
+- reminder_24h       -> reminder sent the day before a booking
+- post_service_feedback -> sent after the session to collect feedback
+- rebooking_prompt   -> gentle nudge to rebook (e.g. 3 weeks after last session)
 
 In the Streamlit app this agent is triggered by a scheduler / cron job,
 not by an inbound user message.
@@ -55,7 +55,7 @@ You generate short, warm WhatsApp-style messages for three scenarios:
 - Warm, not pushy. Mention it might be time for another clean.
 - Keep it under 60 words.
 
-Write in a friendly, human tone — this is WhatsApp, not a formal email.
+Write in a friendly, human tone – this is WhatsApp, not a formal email.
 Use the customer’s first name if available.
 
 Respond ONLY with a valid JSON object. No preamble, no markdown.
