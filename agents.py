@@ -126,11 +126,14 @@ def _parse_date(date_text: str | None, today: date) -> date | None:
 
     if text.startswith("next "):
         day_name = text.replace("next ", "").strip()
+
         if day_name in weekdays:
             target = weekdays[day_name]
             days_ahead = (target - today.weekday()) % 7
+
             if days_ahead == 0:
                 days_ahead = 7
+
             return today + timedelta(days=days_ahead)
 
     try:
@@ -198,6 +201,29 @@ def _invalid_datetime_response(clf: dict, form: dict) -> Response | None:
     )
 
 
+def _sanitize_no_confirmation(resp: Response) -> Response:
+    banned = [
+        "confirmed",
+        "booking is confirmed",
+        "your booking for",
+        "we have confirmed",
+    ]
+
+    lower_msg = resp.message.lower()
+
+    if any(phrase in lower_msg for phrase in banned):
+        resp.message = (
+            "Thank you for your request. I’ve noted the details, but bookings "
+            "cannot be confirmed through this chatbot. Our salesperson will "
+            "contact you shortly to check availability and confirm the booking."
+        )
+        resp.complete = False
+        resp.escalate = False
+        resp.debug["confirmation_removed"] = True
+
+    return resp
+
+
 _CLASSIFY_SCHEMA = json.dumps(
     {
         "intent": "booking | faq | escalation | feedback | out_of_scope",
@@ -242,13 +268,14 @@ Return ONLY valid JSON:
 
     max_booking_date = today + relativedelta(months=6)
 
-    emergency_window = CONFIG.booking.emergency_window_days
     start_hour = CONFIG.hours.start_hour
     end_hour = CONFIG.hours.end_hour
     min_hours = int(CONFIG.booking.min_hours)
     latest_start_hour = end_hour - min_hours
 
     delta = (detected_date - today).days if detected_date else None
+
+    date_text_lower = date_text.lower().strip() if date_text else ""
 
     clf = {
         "intent": raw.get("intent", "faq"),
@@ -274,10 +301,11 @@ Return ONLY valid JSON:
         and detected_date > max_booking_date
     )
 
+    # Emergency should only trigger for explicit today/tomorrow.
+    # Do not treat "next Saturday" as urgent, even if it is soon.
     clf["is_emergency"] = (
         detected_date is not None
-        and delta is not None
-        and 0 <= delta <= emergency_window
+        and date_text_lower in {"today", "tomorrow"}
         and not clf["date_in_past"]
         and not clf["date_too_far"]
     )
@@ -330,7 +358,7 @@ _BOOKING_SCHEMA = json.dumps(
         },
         "is_complete": "true when ALL 6 required fields are filled",
         "next_field": "next missing required field, or null",
-        "escalate": "true ONLY if booking is today or tomorrow",
+        "escalate": "true ONLY if booking is explicitly for today or tomorrow",
     },
     indent=2,
 )
@@ -345,6 +373,13 @@ def run_booking(
     filled = {k: v for k, v in form.items() if v is not None}
     missing = [k for k in _BOOKING_REQUIRED if form.get(k) is None]
 
+    emergency_note = ""
+    if clf and clf.get("is_emergency"):
+        emergency_note = (
+            "This booking is for today/tomorrow. Continue collecting details. "
+            "Do not confirm the booking. Set escalate=true only after enough details are collected."
+        )
+
     system = f"""You are the booking assistant for a cleaning service.
 
 {CONFIG.rules_for_agents()}
@@ -354,13 +389,20 @@ Required fields: {_BOOKING_REQUIRED}
 Already collected: {json.dumps(filled, default=str)}
 Still missing: {missing}
 
+EMERGENCY NOTE:
+{emergency_note or "None"}
+
 RULES:
 - Collect required booking details one or two fields at a time.
 - Never confirm or commit to a booking.
+- Never say "confirmed".
 - A salesperson must confirm all bookings.
+- If the user gives a valid date and time, continue collecting missing fields.
 - If all required fields are collected, say:
   "Thank you! I've noted everything down. Our salesperson will contact you shortly to confirm."
-- Set escalate=true only if the booking date is today or tomorrow.
+- Set escalate=true only if:
+  1. the booking is explicitly for today or tomorrow, and
+  2. enough booking details have been collected for a salesperson to follow up.
 
 Return ONLY valid JSON:
 {_BOOKING_SCHEMA}
@@ -369,12 +411,13 @@ Return ONLY valid JSON:
     raw = _llm(system, history + [{"role": "user", "content": message}])
 
     new_collected = raw.get("collected") or {}
+
     updated_form = {
         **form,
         **{k: v for k, v in new_collected.items() if v is not None},
     }
 
-    return Response(
+    resp = Response(
         message=_get(
             raw,
             "message",
@@ -386,6 +429,8 @@ Return ONLY valid JSON:
         escalate=bool(raw.get("escalate", False)),
         debug={"next_field": raw.get("next_field")},
     )
+
+    return _sanitize_no_confirmation(resp)
 
 
 _FAQ_SCHEMA = json.dumps(
@@ -467,7 +512,9 @@ Context:
 {json.dumps(context or {}, indent=2, default=str)}
 
 RULES:
-- Emergency booking today/tomorrow: reassure the customer and say the team will WhatsApp them shortly. Set urgency=critical.
+- Never confirm bookings.
+- Never say "confirmed".
+- Emergency booking today/tomorrow: say a salesperson will WhatsApp them shortly to check availability.
 - Complaint or negative feedback: empathise and promise human follow-up. Set urgency=high.
 - Unanswerable FAQ: politely say you will connect them with the team. Set urgency=routine.
 
@@ -477,7 +524,7 @@ Return ONLY valid JSON:
 
     raw = _llm(system, history + [{"role": "user", "content": message}])
 
-    return Response(
+    resp = Response(
         message=_get(
             raw,
             "message_to_user",
@@ -490,6 +537,8 @@ Return ONLY valid JSON:
             "urgency": raw.get("urgency"),
         },
     )
+
+    return _sanitize_no_confirmation(resp)
 
 
 def process_message(
@@ -517,19 +566,16 @@ def process_message(
             ]
         )
 
-        if clf.get("is_emergency", False):
-            resp = run_escalation(message, history, clf)
-
-        elif intent == "escalation":
-            resp = run_escalation(message, history, clf)
-
-        elif intent == "booking" or (booking_started and intent != "feedback"):
+        if intent == "booking" or (booking_started and intent != "feedback"):
             resp = run_booking(message, history, form, clf=clf)
 
-            if resp.escalate:
+            if resp.escalate and clf.get("is_emergency", False):
                 saved_form = resp.form
                 resp = run_escalation(message, history, {**clf, "form": saved_form})
                 resp.form = saved_form
+
+        elif intent == "escalation":
+            resp = run_escalation(message, history, clf)
 
         elif intent in ("faq", "out_of_scope"):
             resp = run_faq(message, history)
@@ -565,7 +611,7 @@ def process_message(
             }
         )
 
-        return resp
+        return _sanitize_no_confirmation(resp)
 
     except Exception as exc:
         log.error("process_message crashed: %s", exc, exc_info=True)
