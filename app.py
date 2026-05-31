@@ -459,13 +459,11 @@ if prompt := st.chat_input("Type your message..."):
                 history=st.session_state.history,
                 form=st.session_state.form,
             )
-
-        agent = response.agent or "system"
-
-        response.debug["agent"] = agent
-        response.debug["escalate"] = response.escalate
-        response.debug["message_preview"] = response.message[:300]
-        response.debug["form"] = response.form
+            agent = response.agent or "system"
+            response.debug["agent"] = agent
+            response.debug["escalate"] = response.escalate
+            response.debug["message_preview"] = response.message[:300]
+            response.debug["form"] = response.form
 
         _render_assistant(
             _badge(agent),
