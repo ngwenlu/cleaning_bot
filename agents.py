@@ -126,14 +126,11 @@ def _parse_date(date_text: str | None, today: date) -> date | None:
 
     if text.startswith("next "):
         day_name = text.replace("next ", "").strip()
-
         if day_name in weekdays:
             target = weekdays[day_name]
             days_ahead = (target - today.weekday()) % 7
-
             if days_ahead == 0:
                 days_ahead = 7
-
             return today + timedelta(days=days_ahead)
 
     try:
@@ -152,21 +149,61 @@ def _parse_time(time_text: str | None) -> time | None:
         return None
 
 
-def _time_label(value: str) -> str:
+def _time_label(value) -> str:
     try:
         parsed = date_parser.parse(str(value)).time()
         hour = parsed.hour
         minute = parsed.minute
         suffix = "am" if hour < 12 else "pm"
         hour12 = hour % 12 or 12
-
-        if minute == 0:
-            return f"{hour12}{suffix}"
-
-        return f"{hour12}:{minute:02d}{suffix}"
-
+        return f"{hour12}{suffix}" if minute == 0 else f"{hour12}:{minute:02d}{suffix}"
     except Exception:
         return str(value)
+
+
+def _format_hours(hours) -> str:
+    try:
+        h = float(hours)
+        return f"{h:g}"
+    except Exception:
+        return str(hours)
+
+
+def _sanitize_no_confirmation_message(message: str) -> tuple[str, bool]:
+    banned_phrases = [
+        "confirmed",
+        "booking is confirmed",
+        "your booking is confirmed",
+        "your cleaning session is confirmed",
+        "confirmed for",
+        "we have confirmed",
+        "booking has been confirmed",
+    ]
+
+    lower = message.lower()
+
+    if any(phrase in lower for phrase in banned_phrases):
+        return (
+            "Thank you. I've noted your request. "
+            "A salesperson will review your details and contact you to confirm availability. "
+            "Bookings cannot be confirmed through this chatbot.",
+            True,
+        )
+
+    return message, False
+
+
+def _sanitize_no_confirmation(resp: Response) -> Response:
+    cleaned, changed = _sanitize_no_confirmation_message(resp.message)
+
+    if changed:
+        resp.message = cleaned
+        resp.complete = False
+        resp.escalate = False
+        resp.agent = "booking" if resp.agent == "escalation" else resp.agent
+        resp.debug["confirmation_removed"] = True
+
+    return resp
 
 
 def _validate_duration_against_time(form: dict) -> str | None:
@@ -186,10 +223,17 @@ def _validate_duration_against_time(form: dict) -> str | None:
     end_decimal = start_decimal + hours
 
     if end_decimal > CONFIG.hours.end_hour:
+        latest_start_decimal = CONFIG.hours.end_hour - hours
+        latest_hour = int(latest_start_decimal)
+        latest_minute = int(round((latest_start_decimal - latest_hour) * 60))
+
+        latest_label = _time_label(f"{latest_hour:02d}:{latest_minute:02d}")
+
         return (
             "The requested duration does not fit the start time. "
-            f"A {hours:g}-hour session starting at {_time_label(str(requested_time))} "
+            f"A {_format_hours(hours)}-hour session starting at {_time_label(str(requested_time))} "
             f"would end after {CONFIG.hours.end_label}. "
+            f"For a {_format_hours(hours)}-hour session, the latest start time is {latest_label}. "
             "Please choose an earlier start time or fewer hours."
         )
 
@@ -221,10 +265,11 @@ def _invalid_datetime_response(clf: dict, form: dict) -> Response | None:
 
     if clf.get("time_too_late") and clf.get("detected_time"):
         messages.append(
-            f"The requested start time {_time_label(clf['detected_time'])} is too late. "
+            f"The requested start time {_time_label(clf['detected_time'])} is too late for the minimum booking. "
             f"The minimum booking is {CONFIG.booking.min_hours:.0f} hours, "
             f"and all sessions must finish by {CONFIG.hours.end_label}. "
-            f"So the latest start time is {CONFIG.hours.latest_start(CONFIG.booking.min_hours)}. "
+            f"So the latest start time for a {CONFIG.booking.min_hours:.0f}-hour session is "
+            f"{CONFIG.hours.latest_start(CONFIG.booking.min_hours)}. "
             "Please choose an earlier start time."
         )
 
@@ -239,29 +284,6 @@ def _invalid_datetime_response(clf: dict, form: dict) -> Response | None:
         escalate=False,
         debug={"blocked_by_python_validation": True},
     )
-
-
-def _sanitize_no_confirmation(resp: Response) -> Response:
-    banned_phrases = [
-        "confirmed",
-        "booking is confirmed",
-        "your booking for",
-        "we have confirmed",
-    ]
-
-    lower_msg = resp.message.lower()
-
-    if any(phrase in lower_msg for phrase in banned_phrases):
-        resp.message = (
-            "Thank you for your request. I’ve noted the details, but bookings "
-            "cannot be confirmed through this chatbot. Our salesperson will "
-            "contact you shortly to check availability and confirm the booking."
-        )
-        resp.complete = False
-        resp.escalate = False
-        resp.debug["confirmation_removed"] = True
-
-    return resp
 
 
 _CLASSIFY_SCHEMA = json.dumps(
@@ -310,8 +332,8 @@ Return ONLY valid JSON:
 
     start_hour = CONFIG.hours.start_hour
     end_hour = CONFIG.hours.end_hour
-    min_hours = int(CONFIG.booking.min_hours)
-    latest_start_hour = end_hour - min_hours
+    min_hours = float(CONFIG.booking.min_hours)
+    latest_start_decimal = end_hour - min_hours
 
     delta = (detected_date - today).days if detected_date else None
     date_text_lower = date_text.lower().strip() if date_text else ""
@@ -329,11 +351,7 @@ Return ONLY valid JSON:
         "max_booking_date": max_booking_date.isoformat(),
     }
 
-    clf["date_in_past"] = (
-        detected_date is not None
-        and delta is not None
-        and delta < 0
-    )
+    clf["date_in_past"] = detected_date is not None and delta is not None and delta < 0
 
     clf["date_too_far"] = (
         detected_date is not None
@@ -355,17 +373,14 @@ Return ONLY valid JSON:
         )
     )
 
-    clf["time_too_late"] = (
-        detected_time is not None
-        and not clf["time_outside_hours"]
-        and (
-            detected_time.hour > latest_start_hour
-            or (
-                detected_time.hour == latest_start_hour
-                and detected_time.minute > 0
-            )
+    if detected_time is not None:
+        start_decimal = detected_time.hour + (detected_time.minute / 60)
+        clf["time_too_late"] = (
+            not clf["time_outside_hours"]
+            and start_decimal > latest_start_decimal
         )
-    )
+    else:
+        clf["time_too_late"] = False
 
     print("DEBUG CLASSIFIER:", json.dumps(clf, indent=2, default=str), flush=True)
     log.warning("DEBUG CLASSIFIER: %s", json.dumps(clf, default=str))
@@ -398,7 +413,7 @@ _BOOKING_SCHEMA = json.dumps(
         },
         "is_complete": "true when ALL 6 required fields are filled",
         "next_field": "next missing required field, or null",
-        "escalate": "true ONLY if booking is explicitly for today or tomorrow",
+        "escalate": "false always",
     },
     indent=2,
 )
@@ -432,9 +447,9 @@ RULES:
 - A salesperson must confirm all bookings.
 - If the user gives a valid date and time, continue collecting missing fields.
 - 6pm is a VALID start time for a 3-hour session because sessions end by 9pm.
-- If requested_time plus hours_needed exceeds {CONFIG.hours.end_label}, do not complete the booking. Ask for an earlier start time or fewer hours.
+- If requested_time plus hours_needed exceeds {CONFIG.hours.end_label}, do not complete the booking.
 - Never mark is_complete=true until requested_time plus hours_needed ends by {CONFIG.hours.end_label}.
-- Always set escalate=false. The Python orchestrator handles escalation.
+- Always set escalate=false.
 - If all required fields are collected and time/duration is valid, say:
   "Thank you! I've noted everything down. Our salesperson will contact you shortly to confirm."
 
@@ -467,20 +482,27 @@ Return ONLY valid JSON:
             },
         )
 
-    resp = Response(
-        message=_get(
-            raw,
-            "message",
-            "Sorry, I didn't catch that — could you repeat it?",
-        ),
-        agent="booking",
-        form=updated_form,
-        complete=bool(raw.get("is_complete", False)),
-        escalate=False,
-        debug={"next_field": raw.get("next_field")},
+    message_text = _get(
+        raw,
+        "message",
+        "Sorry, I didn't catch that — could you repeat it?",
     )
 
-    return _sanitize_no_confirmation(resp)
+    cleaned_message, confirmation_removed = _sanitize_no_confirmation_message(message_text)
+
+    resp = Response(
+        message=cleaned_message,
+        agent="booking",
+        form=updated_form,
+        complete=bool(raw.get("is_complete", False)) and not confirmation_removed,
+        escalate=False,
+        debug={
+            "next_field": raw.get("next_field"),
+            "confirmation_removed": confirmation_removed,
+        },
+    )
+
+    return resp
 
 
 _FAQ_SCHEMA = json.dumps(
@@ -601,6 +623,7 @@ def process_message(
         intent = clf["intent"]
 
         invalid_resp = _invalid_datetime_response(clf, form)
+
         if invalid_resp is not None:
             invalid_resp.intent = intent
             invalid_resp.debug.update(clf)
