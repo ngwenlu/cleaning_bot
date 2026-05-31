@@ -3,8 +3,8 @@ Escalation Agent
 
 Handles two cases:
 
-1. Emergency bookings (same/next day) → CRITICAL urgency
-1. Complaints, explicit human requests, unanswerable FAQs → HIGH urgency
+1. Emergency bookings (same/next day) -> CRITICAL urgency
+1. Complaints, explicit human requests, unanswerable FAQs -> HIGH urgency
 
 Produces an EscalationRequest that:
 
@@ -31,14 +31,14 @@ UrgencyLevel,
 _SCHEMA = json.dumps(
 {
 “urgency”: “one of: routine | high | critical”,
-“reason”: “one sentence — why escalation was triggered”,
+“reason”: “one sentence – why escalation was triggered”,
 “customer”: {
 “name”:  “string or null”,
 “phone”: “string or null”,
 “email”: “string or null”,
 },
 “conversation_summary”: (
-“3–5 sentence summary of the conversation for the salesperson. “
+“3-5 sentence summary of the conversation for the salesperson. “
 “Include: what the customer wants, any details already collected, sentiment.”
 ),
 “message_to_user”: (
@@ -46,7 +46,7 @@ _SCHEMA = json.dumps(
 “For emergencies: reassure and set expectations. “
 “For complaints: empathise and commit to follow-up.”
 ),
-“notify_via”: “list — e.g. [‘whatsapp’, ‘email’]”,
+“notify_via”: “list – e.g. [‘whatsapp’, ‘email’]”,
 },
 indent=2,
 )
@@ -61,10 +61,10 @@ def system_prompt(self) -> str:
 
 You are invoked when:
 
-- The booking is for TODAY or TOMORROW (emergency) → urgency=critical
-- The customer has a complaint or is upset → urgency=high
-- The customer asked to speak to a human → urgency=high
-- The FAQ agent could not answer the question → urgency=routine
+- The booking is for TODAY or TOMORROW (emergency) -> urgency=critical
+- The customer has a complaint or is upset -> urgency=high
+- The customer asked to speak to a human -> urgency=high
+- The FAQ agent could not answer the question -> urgency=routine
 
 Your job:
 
