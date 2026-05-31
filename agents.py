@@ -137,11 +137,7 @@ def _parse_date(date_text: str | None, today: date) -> date | None:
             return today + timedelta(days=days_ahead)
 
     try:
-        return date_parser.parse(
-            date_text,
-            dayfirst=True,
-            fuzzy=True,
-        ).date()
+        return date_parser.parse(date_text, dayfirst=True, fuzzy=True).date()
     except Exception:
         return None
 
@@ -202,7 +198,7 @@ def _invalid_datetime_response(clf: dict, form: dict) -> Response | None:
 
 
 def _sanitize_no_confirmation(resp: Response) -> Response:
-    banned = [
+    banned_phrases = [
         "confirmed",
         "booking is confirmed",
         "your booking for",
@@ -211,7 +207,7 @@ def _sanitize_no_confirmation(resp: Response) -> Response:
 
     lower_msg = resp.message.lower()
 
-    if any(phrase in lower_msg for phrase in banned):
+    if any(phrase in lower_msg for phrase in banned_phrases):
         resp.message = (
             "Thank you for your request. I’ve noted the details, but bookings "
             "cannot be confirmed through this chatbot. Our salesperson will "
@@ -274,7 +270,6 @@ Return ONLY valid JSON:
     latest_start_hour = end_hour - min_hours
 
     delta = (detected_date - today).days if detected_date else None
-
     date_text_lower = date_text.lower().strip() if date_text else ""
 
     clf = {
@@ -301,8 +296,6 @@ Return ONLY valid JSON:
         and detected_date > max_booking_date
     )
 
-    # Emergency should only trigger for explicit today/tomorrow.
-    # Do not treat "next Saturday" as urgent, even if it is soon.
     clf["is_emergency"] = (
         detected_date is not None
         and date_text_lower in {"today", "tomorrow"}
@@ -329,6 +322,8 @@ Return ONLY valid JSON:
             )
         )
     )
+
+    log.warning("DEBUG CLASSIFIER: %s", clf)
 
     return clf
 
@@ -373,13 +368,6 @@ def run_booking(
     filled = {k: v for k, v in form.items() if v is not None}
     missing = [k for k in _BOOKING_REQUIRED if form.get(k) is None]
 
-    emergency_note = ""
-    if clf and clf.get("is_emergency"):
-        emergency_note = (
-            "This booking is for today/tomorrow. Continue collecting details. "
-            "Do not confirm the booking. Set escalate=true only after enough details are collected."
-        )
-
     system = f"""You are the booking assistant for a cleaning service.
 
 {CONFIG.rules_for_agents()}
@@ -389,8 +377,8 @@ Required fields: {_BOOKING_REQUIRED}
 Already collected: {json.dumps(filled, default=str)}
 Still missing: {missing}
 
-EMERGENCY NOTE:
-{emergency_note or "None"}
+CURRENT CLASSIFIER CONTEXT:
+{json.dumps(clf or {}, indent=2, default=str)}
 
 RULES:
 - Collect required booking details one or two fields at a time.
@@ -398,11 +386,11 @@ RULES:
 - Never say "confirmed".
 - A salesperson must confirm all bookings.
 - If the user gives a valid date and time, continue collecting missing fields.
+- 6pm is a VALID start time because minimum booking is 3 hours and sessions end by 9pm.
+- Only times AFTER 6pm are too late.
 - If all required fields are collected, say:
   "Thank you! I've noted everything down. Our salesperson will contact you shortly to confirm."
-- Set escalate=true only if:
-  1. the booking is explicitly for today or tomorrow, and
-  2. enough booking details have been collected for a salesperson to follow up.
+- Always set escalate=false. The Python orchestrator handles escalation.
 
 Return ONLY valid JSON:
 {_BOOKING_SCHEMA}
@@ -426,7 +414,7 @@ Return ONLY valid JSON:
         agent="booking",
         form=updated_form,
         complete=bool(raw.get("is_complete", False)),
-        escalate=bool(raw.get("escalate", False)),
+        escalate=False,
         debug={"next_field": raw.get("next_field")},
     )
 
@@ -569,7 +557,13 @@ def process_message(
         if intent == "booking" or (booking_started and intent != "feedback"):
             resp = run_booking(message, history, form, clf=clf)
 
-            if resp.escalate and clf.get("is_emergency", False):
+            enough_for_urgent_followup = (
+                resp.form.get("customer_name")
+                and resp.form.get("requested_date")
+                and resp.form.get("requested_time")
+            )
+
+            if clf.get("is_emergency") and enough_for_urgent_followup:
                 saved_form = resp.form
                 resp = run_escalation(message, history, {**clf, "form": saved_form})
                 resp.form = saved_form
@@ -608,6 +602,7 @@ def process_message(
                 "date_too_far": clf.get("date_too_far"),
                 "time_outside_hours": clf.get("time_outside_hours"),
                 "time_too_late": clf.get("time_too_late"),
+                "form": resp.form,
             }
         )
 
