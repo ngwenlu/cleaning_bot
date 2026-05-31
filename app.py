@@ -400,6 +400,23 @@ with st.sidebar:
 
         with st.expander("🧪 Full debug JSON", expanded=False):
             st.json(debug)
+            
+        if st.session_state.debug_log:
+            with st.expander("📜 Debug History", expanded=False):
+
+                for item in reversed(st.session_state.debug_log[-20:]):
+
+                    st.markdown(
+                f"### Turn {item['turn']} ({item['agent']})"
+            )
+
+                    st.write("User:")
+                    st.code(item["user"])
+
+                    st.write("Debug:")
+                    st.json(item["debug"])
+
+                    st.markdown("---")
 
     st.markdown("---")
 
