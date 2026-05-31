@@ -8,11 +8,11 @@ from dataclasses import dataclass
 
 @dataclass
 class KBEntry:
-key:     str
-topics:  list[str]   # used in FAQAgentResponse.sources
-answer:  str
-
-KNOWLEDGE_BASE: list[KBEntry] = [
+    key:     str
+    topics:  list[str]   # used in FAQAgentResponse.sources
+    answer:  str
+    
+    KNOWLEDGE_BASE: list[KBEntry] = [
 KBEntry(
 key="service_type",
 topics=["service", "what do you offer", "cleaning type"],
@@ -104,13 +104,13 @@ answer=(
 ]
 
 def get_full_kb_text() -> str:
-"""Return the full knowledge base as a formatted string for injection into prompts."""
-lines = []
-for entry in KNOWLEDGE_BASE:
-lines.append(f"### {entry.key}")
-lines.append(entry.answer)
-lines.append("")
-return "\n".join(lines)
+    """Return the full knowledge base as a formatted string for injection into prompts."""
+    lines = []
+    for entry in KNOWLEDGE_BASE:
+        lines.append(f"### {entry.key}")
+        lines.append(entry.answer)
+        lines.append("")
+        return "\n".join(lines)
 
 def get_source_keys() -> list[str]:
-return [e.key for e in KNOWLEDGE_BASE]
+    return [e.key for e in KNOWLEDGE_BASE]
