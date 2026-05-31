@@ -1,4 +1,4 @@
-“””
+"""
 Escalation Agent
 
 Handles two cases:
@@ -11,7 +11,7 @@ Produces an EscalationRequest that:
 - Tells the customer what’s happening
 - Gives the salesperson a conversation summary
 - Specifies notification channels
-  “””
+"""
 
 from **future** import annotations
 
@@ -30,23 +30,23 @@ UrgencyLevel,
 
 _SCHEMA = json.dumps(
 {
-“urgency”: “one of: routine | high | critical”,
-“reason”: “one sentence – why escalation was triggered”,
-“customer”: {
-“name”:  “string or null”,
-“phone”: “string or null”,
-“email”: “string or null”,
+"urgency": "one of: routine | high | critical",
+"reason": "one sentence – why escalation was triggered",
+"customer": {
+"name”:  "string or null",
+"phone”: "string or null",
+"email”: "string or null",
 },
-“conversation_summary”: (
-“3-5 sentence summary of the conversation for the salesperson. “
-“Include: what the customer wants, any details already collected, sentiment.”
+"conversation_summary": (
+"3-5 sentence summary of the conversation for the salesperson. "
+"Include: what the customer wants, any details already collected, sentiment."
 ),
-“message_to_user”: (
-“What to say to the customer right now. “
-“For emergencies: reassure and set expectations. “
-“For complaints: empathise and commit to follow-up.”
+"message_to_user": (
+"What to say to the customer right now. "
+"For emergencies: reassure and set expectations. "
+"For complaints: empathise and commit to follow-up."
 ),
-“notify_via”: “list – e.g. [‘whatsapp’, ‘email’]”,
+"notify_via": "list – e.g. [‘whatsapp’, ‘email’]",
 },
 indent=2,
 )
@@ -84,7 +84,7 @@ Someone will WhatsApp you within the next few minutes.”
 
 Respond ONLY with a valid JSON object. No preamble, no markdown.
 {_SCHEMA}
-“””
+"""
 
 ```
 def parse_response(self, raw: dict) -> EscalationRequest:
