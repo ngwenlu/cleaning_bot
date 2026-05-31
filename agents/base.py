@@ -44,6 +44,8 @@ class BaseAgent(ABC):
         user_message: str,
         history: list[ConversationMessage] | None = None,
         extra_system: str = "",
+        model_override: str | None = None,
+        max_tokens_override: int | None = None,
     ) -> dict:
         system = self.system_prompt
 
@@ -75,11 +77,14 @@ class BaseAgent(ABC):
             *messages,
         ]
 
+        selected_model = model_override or MODEL
+        selected_max_tokens = max_tokens_override or MAX_TOKENS
+
         try:
             response = client.chat.completions.create(
-                model=MODEL,
+                model=selected_model,
                 messages=openai_messages,
-                max_completion_tokens=MAX_TOKENS,
+                max_completion_tokens=selected_max_tokens,
                 response_format={"type": "json_object"},
             )
         except Exception as exc:
@@ -93,7 +98,9 @@ class BaseAgent(ABC):
             finish = choice.finish_reason
             refusal = getattr(choice.message, "refusal", None)
             detail = refusal or f"finish_reason={finish}"
+
             logger.error("Empty model response: %s", detail)
+
             raise ValueError(
                 f"Model returned no content ({detail}). Try rephrasing."
             )
