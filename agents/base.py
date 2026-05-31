@@ -79,7 +79,7 @@ class BaseAgent(ABC):
             response = client.chat.completions.create(
                 model=MODEL,
                 messages=openai_messages,
-                max_tokens=MAX_TOKENS,
+                max_tokens=MAX_COMPLETION_TOKENS,
             )
         except Exception as exc:
             logger.error("OpenAI API call failed: %s", exc)
