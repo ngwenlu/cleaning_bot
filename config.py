@@ -27,7 +27,7 @@ def _get(key: str, default: str = "") -> str:
 # Model
 
 MODEL = "gpt-5"
-MAX_TOKENS = 1024
+MAX_TOKENS = 2048
 
 
 # Client (singleton)
