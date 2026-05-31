@@ -17,7 +17,6 @@ from models import (
     BookingAgentResponse,
     BookingDetails,
     ConversationMessage,
-    CustomerInfo,
 )
 
 
@@ -25,24 +24,14 @@ _SCHEMA = json.dumps(
     {
         "message": "Natural language reply to the user",
         "collected": {
-            "customer": {
-                "name": "string or null",
-                "phone": "string or null",
-                "email": "string or null",
-            },
+            "customer_name": "string or null",
+            "address": "string or null",
             "requested_date": "YYYY-MM-DD or null",
             "requested_time": "HH:MM:SS or null",
-            "address": "string or null",
-            "postal_code": "string or null",
-            "apartment_type": (
-                "one of: hdb_1_2_room | hdb_3_room | hdb_4_room | "
-                "hdb_5_room | condo_studio | condo_1_bed | condo_2_bed | "
-                "condo_3_bed | landed | office | other, or null"
-            ),
             "hours_needed": "number or null",
-            "num_rooms": "integer or null",
-            "special_instructions": "string or null",
-            "supplies_confirmed": "boolean",
+            "has_pets": "boolean or null, where null means not yet asked",
+            "contact": "phone or email string if volunteered, else null",
+            "notes": "any extra context the customer mentions, else null",
         },
         "is_complete": "boolean, true only when ALL required fields are filled",
         "next_field_to_ask": "name of the next missing required field, or null if complete",
@@ -52,16 +41,18 @@ _SCHEMA = json.dumps(
 
 
 _REQUIRED_FIELDS_DESC = """
-Required fields. Collect all of these before marking is_complete=true:
+Required fields. Collect ALL before marking is_complete=true:
 
-1. customer.name
-2. customer.phone OR customer.email
-3. requested_date  (YYYY-MM-DD)
-4. requested_time  (HH:MM)
-5. address
-6. apartment_type
-7. hours_needed
-8. supplies_confirmed, meaning the customer explicitly acknowledges that they will provide all supplies
+1. customer_name   - the customer's name
+2. address         - full address of the property to be cleaned
+3. requested_date  - date of the session, YYYY-MM-DD
+4. requested_time  - start time of the session, HH:MM
+5. hours_needed    - how many hours the cleaning will take
+6. has_pets        - whether there are pets at the property, yes/no
+
+Optional fields. Ask only after all required fields are collected, or if the customer volunteers:
+- contact          - phone or email for the salesperson to follow up
+- notes            - anything else relevant
 """
 
 
@@ -121,24 +112,14 @@ Schema:
 """
 
     def parse_response(self, raw: dict) -> BookingAgentResponse:
-        collected_raw = raw.get("collected", {}).copy()
-        customer_raw = collected_raw.pop("customer", {}) or {}
-
-        customer = CustomerInfo(
-            **{
-                key: value
-                for key, value in customer_raw.items()
-                if value is not None
-            }
-        )
+        collected_raw = raw.get("collected", {}) or {}
 
         collected = BookingDetails(
-            customer=customer,
             **{
                 key: value
                 for key, value in collected_raw.items()
                 if value is not None
-            },
+            }
         )
 
         return BookingAgentResponse(
@@ -161,13 +142,20 @@ Schema:
             filled = {
                 key: value
                 for key, value in existing_details.model_dump().items()
-                if value is not None and value != {} and value is not False
+                if value is not None
+                and value is not False
+                and key
+                not in (
+                    "is_emergency",
+                    "date_in_past",
+                    "time_outside_hours",
+                )
             }
 
             extra = (
-                "Current collected details already known. Do not re-ask these:\n"
+                "Already collected. Do not re-ask these:\n"
                 f"{json.dumps(filled, indent=2, default=str)}\n\n"
-                f"Missing fields: {existing_details.missing_fields()}"
+                f"Still missing: {existing_details.missing_fields()}"
             )
 
         raw = self._call_llm(
