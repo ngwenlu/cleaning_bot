@@ -1,4 +1,4 @@
-“””
+"""
 Orchestrator
 
 Entry point for every user message. Steps:
@@ -10,7 +10,7 @@ Entry point for every user message. Steps:
 
 Session state (BookingDetails accumulated across turns) is passed in
 and returned so the Streamlit app can persist it.
-“””
+"""
 
 from **future** import annotations
 
@@ -43,11 +43,11 @@ _follow_up_agent   = FollowUpAgent()
 def _routing_note(classification: IntentClassification, route_to: AgentType) -> str:
 notes = []
 if classification.is_emergency:
-notes.append(“Emergency booking detected – routed to escalation.”)
+notes.append("Emergency booking detected – routed to escalation.")
 if classification.confidence < 0.6:
-notes.append(f”Low confidence ({classification.confidence:.2f}) – monitor.”)
-notes.append(f”Sentiment: {classification.sentiment}, Urgency: {classification.urgency}”)
-return “ | “.join(notes)
+notes.append(f"Low confidence ({classification.confidence:.2f}) – monitor.")
+notes.append(f"Sentiment: {classification.sentiment}, Urgency: {classification.urgency}")
+return " | ".join(notes)
 
 def process_message(
 user_message: str,
@@ -56,7 +56,7 @@ session_id: str | None = None,
 booking_details: BookingDetails | None = None,
 turn_number: int = 1,
 ) -> tuple[ChatTurn, BookingDetails | None]:
-“””
+"""
 Process one user message end-to-end.
 
 ```
