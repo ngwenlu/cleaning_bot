@@ -261,6 +261,15 @@ Return ONLY valid JSON:
         and delta > emergency_window
         and clf["intent"] in ("feedback", "escalation")
     )
+    
+    log.warning(
+    "DATE DEBUG | raw=%s | parsed=%s | delta=%s | max=%s | too_far=%s",
+    date_text,
+    detected_date,
+    delta,
+    max_advance_days,
+    delta > max_advance_days if delta is not None else None,
+)
 
     return clf
 
