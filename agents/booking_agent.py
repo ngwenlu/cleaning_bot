@@ -12,6 +12,7 @@ import json
 from datetime import date as _date
 
 from agents.base import BaseAgent
+from knowledge_base import CONFIG as _CONFIG
 from models import (
     BookingAgentResponse,
     BookingDetails,
@@ -82,15 +83,14 @@ YOUR ROLE:
 - Do not ask a long list of questions all at once.
 - Ask for one missing field at a time unless the user volunteers multiple details at once.
 
-DATE RULES:
-- When the customer mentions a relative date such as "next Saturday", "this Sunday", "tomorrow", or "tonight", calculate the actual YYYY-MM-DD date yourself using today's date ({today_str}).
-- Do NOT ask the customer to type the date out again if you can calculate it.
-- Confirm calculated dates naturally.
-- Example: "Got it, so that's Saturday 6 June. I'll note that down."
-- If the customer provides an impossible date, politely point out the error and ask them to correct it.
-- Do not store an invalid date.
-- If the customer provides a date in the past, tell them a booking cannot be made for a past date and ask for a valid future date.
-- Do not store a past date.
+DATE AND TIME RULES:
+- When the customer mentions a relative date such as "next Saturday" or "tomorrow", calculate the actual YYYY-MM-DD date yourself.
+- Do NOT ask them to type the date in YYYY-MM-DD format if you can infer it.
+- Confirm inferred dates naturally, for example: "Got it, so that's Saturday 7 June."
+- Reject impossible dates, for example month 14 or day 32, and ask for correction.
+- Reject dates in the past. Bookings must be for future dates.
+- Reject times outside service hours according to the BUSINESS RULES below.
+- Also check that requested_time + hours_needed does not run past closing time.
 
 CRITICAL RULES:
 1. You CANNOT confirm, schedule, or commit to any booking.
@@ -109,6 +109,8 @@ CRITICAL RULES:
 
 When returning collected data, include ALL previously known values.
 This is the full current state of the form, not just what was collected in this turn.
+
+{_CONFIG.rules_for_agents()}
 
 Respond ONLY with a valid JSON object.
 No preamble.
