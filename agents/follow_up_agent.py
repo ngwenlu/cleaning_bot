@@ -1,4 +1,4 @@
-“””
+"""
 Follow-up Agent
 
 Handles outbound follow-up messages:
@@ -9,7 +9,7 @@ Handles outbound follow-up messages:
 
 In the Streamlit app this agent is triggered by a scheduler / cron job,
 not by an inbound user message.
-“””
+"""
 
 from **future** import annotations
 
@@ -20,12 +20,12 @@ from models import BookingDetails, ConversationMessage, CustomerInfo, FollowUpAg
 
 _SCHEMA = json.dumps(
 {
-“message”: “The follow-up message to send to the customer via WhatsApp/SMS”,
-“follow_up_type”: “one of: reminder_24h | post_service_feedback | rebooking_prompt”,
-“customer”: {
-“name”:  “string or null”,
-“phone”: “string or null”,
-“email”: “string or null”,
+"message": "The follow-up message to send to the customer via WhatsApp/SMS",
+"follow_up_type": "one of: reminder_24h | post_service_feedback | rebooking_prompt",
+"customer": {
+"name":  "string or null",
+"phone": "string or null",
+"email": "string or null",
 },
 },
 indent=2,
@@ -60,7 +60,7 @@ Use the customer’s first name if available.
 
 Respond ONLY with a valid JSON object. No preamble, no markdown.
 {_SCHEMA}
-“””
+"""
 
 ```
 def parse_response(self, raw: dict) -> FollowUpAgentResponse:
