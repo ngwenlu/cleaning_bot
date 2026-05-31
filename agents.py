@@ -385,6 +385,8 @@ Return ONLY valid JSON:
     print("DEBUG CLASSIFIER:", json.dumps(clf, indent=2, default=str), flush=True)
     log.warning("DEBUG CLASSIFIER: %s", json.dumps(clf, default=str))
 
+    clf["classifier_debug_generated"] = True
+
     return clf
 
 
