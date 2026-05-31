@@ -18,7 +18,7 @@ _SCHEMA = json.dumps(
 {
 “message”: “Answer to the customer’s question, in plain conversational English”,
 “sources”: “list of knowledge base keys used, e.g. [‘pricing’, ‘supplies’]”,
-“answered”: “boolean — false if the question is outside the knowledge base”,
+“answered”: “boolean – false if the question is outside the knowledge base”,
 },
 indent=2,
 )
@@ -43,7 +43,7 @@ Available source keys: {source_keys}
 # === KNOWLEDGE BASE ===
 {kb_text}
 
-Keep answers friendly and concise. Use plain English — no jargon.
+Keep answers friendly and concise. Use plain English – no jargon.
 For multi-point answers, use short bullet lists.
 
 Respond ONLY with a valid JSON object. No preamble, no markdown.
