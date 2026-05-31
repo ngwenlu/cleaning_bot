@@ -69,7 +69,7 @@ class ConversationMessage(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     agent_type: Optional[AgentType] = Field(
         None,
-        description="Which agent produced this message, for assistant turns only",
+        description="Which agent produced this message, assistant turns only",
     )
 
 
@@ -90,7 +90,7 @@ class CustomerInfo(BaseModel):
 
         if not (digits.isdigit() and len(digits) in (8, 10)):
             raise ValueError(
-                "Phone must be a valid Singapore number, either 8 digits or +65xxxxxxxx."
+                "Phone must be a valid Singapore number, 8 digits or +65xxxxxxxx."
             )
 
         return value
@@ -106,7 +106,10 @@ class IntentClassification(BaseModel):
     sentiment: Sentiment
     urgency: UrgencyLevel
     confidence: float = Field(..., ge=0.0, le=1.0)
-    reasoning: str = Field(..., description="Brief explanation of the classification")
+    reasoning: str = Field(
+        ...,
+        description="Brief LLM explanation of the classification",
+    )
     is_emergency: bool = Field(
         False,
         description="True when the requested date is today or tomorrow.",
@@ -115,6 +118,20 @@ class IntentClassification(BaseModel):
         None,
         description="Booking date explicitly mentioned by the user, if any",
     )
+
+    @field_validator("detected_date", mode="before")
+    @classmethod
+    def coerce_detected_date(cls, value):
+        """Return None for any date that fails parsing rather than crashing."""
+        if value is None:
+            return None
+
+        try:
+            if isinstance(value, str):
+                date.fromisoformat(value)
+            return value
+        except (ValueError, TypeError):
+            return None
 
     @model_validator(mode="after")
     def sync_emergency_flag(self) -> "IntentClassification":
@@ -166,7 +183,7 @@ class BookingDetails(BaseModel):
         return self
 
     def missing_fields(self) -> list[str]:
-        """Return names of required fields that are still missing."""
+        """Return names of required fields that are still None."""
         required = [
             "requested_date",
             "requested_time",
@@ -190,7 +207,10 @@ class BookingAgentResponse(BaseModel):
     """Output returned by the Booking Agent each turn."""
 
     agent_type: AgentType = AgentType.BOOKING
-    message: str = Field(..., description="Natural-language reply to the user")
+    message: str = Field(
+        ...,
+        description="Natural-language reply to the user",
+    )
     collected: BookingDetails = Field(default_factory=BookingDetails)
     is_complete: bool = Field(
         False,
@@ -230,7 +250,7 @@ class EscalationRequest(BaseModel):
     booking_details: Optional[BookingDetails] = None
     conversation_summary: str = Field(
         ...,
-        description="Summary of the conversation so far for the human agent",
+        description="LLM-generated summary of the conversation so far for the human agent",
     )
     message_to_user: str = Field(
         ...,
