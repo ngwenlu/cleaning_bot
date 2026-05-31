@@ -15,7 +15,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Any
 
-from config import MAX_TOKENS, MODEL, client
+from config import MAX_COMPLETION_TOKENS, MODEL, client
 from models import ConversationMessage
 
 logger = logging.getLogger(__name__)
