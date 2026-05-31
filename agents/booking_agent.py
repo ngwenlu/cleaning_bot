@@ -1,10 +1,10 @@
-“””
+"""
 Booking Agent
 
 Collects booking details progressively across turns.
 Does NOT confirm, schedule, or commit to any booking.
 Detects emergency bookings and flags them immediately.
-“””
+"""
 
 from **future** import annotations
 
@@ -20,30 +20,30 @@ CustomerInfo,
 
 _SCHEMA = json.dumps(
 {
-“message”: “Natural language reply to the user”,
-“collected”: {
-“customer”: {
-“name”:  “string or null”,
-“phone”: “string or null”,
-“email”: “string or null”,
+"message": "Natural language reply to the user",
+"collected": {
+"customer": {
+"name":  "string or null",
+"phone": "string or null",
+"email": "string or null",
 },
-“requested_date”:      “YYYY-MM-DD or null”,
-“requested_time”:      “HH:MM:SS or null”,
-“address”:             “string or null”,
-“postal_code”:         “string or null”,
-“apartment_type”:      “one of: hdb_1_2_room | hdb_3_room | hdb_4_room | hdb_5_room | condo_studio | condo_1_bed | condo_2_bed | condo_3_bed | landed | office | other – or null”,
-“hours_needed”:        “number or null”,
-“num_rooms”:           “integer or null”,
-“special_instructions”:“string or null”,
-“supplies_confirmed”:  “boolean”,
+"requested_date":      "YYYY-MM-DD or null",
+"requested_time":      "HH:MM:SS or null",
+"address":             "string or null",
+"postal_code":         "string or null",
+"apartment_type":      "one of: hdb_1_2_room | hdb_3_room | hdb_4_room | hdb_5_room | condo_studio | condo_1_bed | condo_2_bed | condo_3_bed | landed | office | other – or null",
+"hours_needed":        "number or null",
+"num_rooms":           "integer or null",
+"special_instructions":"string or null",
+"supplies_confirmed":  "boolean",
 },
-“is_complete”: “boolean – true only when ALL required fields are filled”,
-“next_field_to_ask”: “name of the next missing required field, or null if complete”,
+"is_complete": "boolean – true only when ALL required fields are filled",
+"next_field_to_ask": "name of the next missing required field, or null if complete",
 },
 indent=2,
 )
 
-_REQUIRED_FIELDS_DESC = “””
+_REQUIRED_FIELDS_DESC = """
 Required fields (collect all of these before marking is_complete=true):
 
 1. customer.name
@@ -54,7 +54,7 @@ Required fields (collect all of these before marking is_complete=true):
 1. apartment_type
 1. hours_needed
 1. supplies_confirmed (must explicitly acknowledge they will provide all supplies)
-   “””
+"""
 
 class BookingAgent(BaseAgent):
 
@@ -91,7 +91,7 @@ state of the form, not just what was collected in this turn.
 
 Respond ONLY with a valid JSON object. No preamble, no markdown.
 {_SCHEMA}
-“””
+"""
 
 ```
 def parse_response(self, raw: dict) -> BookingAgentResponse:
