@@ -635,6 +635,19 @@ def process_message(
 ) -> Response:
     try:
         clf = classify(message, history)
+        booking_keywords = [
+        "book",
+        "booking",
+        "cleaning",
+        "cleaner",
+        "hour",
+        "hours",
+        "am",
+        "pm",
+    ]
+
+    if any(word in message.lower() for word in booking_keywords):
+    intent = "booking"
         intent = clf["intent"]
 
         invalid_resp = _invalid_datetime_response(clf, form)
