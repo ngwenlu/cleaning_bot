@@ -14,24 +14,24 @@ _secrets = st.secrets
 except Exception:
 _secrets = {}
 
-def _get(key: str, default: str = “”) -> str:
-“”“Read from env first, then Streamlit secrets, then default.”””
+def _get(key: str, default: str = "") -> str:
+"""Read from env first, then Streamlit secrets, then default."""
 return os.environ.get(key) or (_secrets.get(key, default) if _secrets else default)
 
 # – Model ——————————————————————
 
-MODEL = “claude-sonnet-4-20250514”
+MODEL = "claude-sonnet-4-20250514"
 MAX_TOKENS = 1024
 
 # – Client (singleton) —————————————————–
 
-client = Anthropic(api_key=_get(“ANTHROPIC_API_KEY”))
+client = Anthropic(api_key=_get("ANTHROPIC_API_KEY"))
 
 # – Business config ––––––––––––––––––––––––––––
 
-COMPANY_NAME         = “Dad’s Cleaning Services”
-SALESPERSON_WHATSAPP = _get(“SALESPERSON_PHONE”, “+6591234567”)
-SALESPERSON_EMAIL    = _get(“SALESPERSON_EMAIL”, “sales@example.com”)
+COMPANY_NAME         = "Dad’s Cleaning Services"
+SALESPERSON_WHATSAPP = _get("SALESPERSON_PHONE", "+6591234567")
+SALESPERSON_EMAIL    = _get("SALESPERSON_EMAIL", "sales@example.com")
 
 # Service hours in Singapore time (SGT = UTC+8)
 
