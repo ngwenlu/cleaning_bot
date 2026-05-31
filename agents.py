@@ -152,6 +152,50 @@ def _parse_time(time_text: str | None) -> time | None:
         return None
 
 
+def _time_label(value: str) -> str:
+    try:
+        parsed = date_parser.parse(str(value)).time()
+        hour = parsed.hour
+        minute = parsed.minute
+        suffix = "am" if hour < 12 else "pm"
+        hour12 = hour % 12 or 12
+
+        if minute == 0:
+            return f"{hour12}{suffix}"
+
+        return f"{hour12}:{minute:02d}{suffix}"
+
+    except Exception:
+        return str(value)
+
+
+def _validate_duration_against_time(form: dict) -> str | None:
+    requested_time = form.get("requested_time")
+    hours_needed = form.get("hours_needed")
+
+    if requested_time is None or hours_needed is None:
+        return None
+
+    try:
+        start = date_parser.parse(str(requested_time)).time()
+        hours = float(hours_needed)
+    except Exception:
+        return None
+
+    start_decimal = start.hour + (start.minute / 60)
+    end_decimal = start_decimal + hours
+
+    if end_decimal > CONFIG.hours.end_hour:
+        return (
+            "The requested duration does not fit the start time. "
+            f"A {hours:g}-hour session starting at {_time_label(str(requested_time))} "
+            f"would end after {CONFIG.hours.end_label}. "
+            "Please choose an earlier start time or fewer hours."
+        )
+
+    return None
+
+
 def _invalid_datetime_response(clf: dict, form: dict) -> Response | None:
     messages = []
 
@@ -170,14 +214,14 @@ def _invalid_datetime_response(clf: dict, form: dict) -> Response | None:
 
     if clf.get("time_outside_hours") and clf.get("detected_time"):
         messages.append(
-            f"The requested time {clf['detected_time']} is outside our service hours. "
+            f"The requested time {_time_label(clf['detected_time'])} is outside our service hours. "
             f"Our service hours are {CONFIG.hours.start_label} to {CONFIG.hours.end_label}. "
             "Please choose a time within this window."
         )
 
     if clf.get("time_too_late") and clf.get("detected_time"):
         messages.append(
-            f"The requested start time {clf['detected_time']} is too late. "
+            f"The requested start time {_time_label(clf['detected_time'])} is too late. "
             f"The minimum booking is {CONFIG.booking.min_hours:.0f} hours, "
             f"and all sessions must finish by {CONFIG.hours.end_label}. "
             f"So the latest start time is {CONFIG.hours.latest_start(CONFIG.booking.min_hours)}. "
@@ -387,11 +431,12 @@ RULES:
 - Never say "confirmed".
 - A salesperson must confirm all bookings.
 - If the user gives a valid date and time, continue collecting missing fields.
-- 6pm is a VALID start time because minimum booking is 3 hours and sessions end by 9pm.
-- Only times AFTER 6pm are too late.
-- If all required fields are collected, say:
-  "Thank you! I've noted everything down. Our salesperson will contact you shortly to confirm."
+- 6pm is a VALID start time for a 3-hour session because sessions end by 9pm.
+- If requested_time plus hours_needed exceeds {CONFIG.hours.end_label}, do not complete the booking. Ask for an earlier start time or fewer hours.
+- Never mark is_complete=true until requested_time plus hours_needed ends by {CONFIG.hours.end_label}.
 - Always set escalate=false. The Python orchestrator handles escalation.
+- If all required fields are collected and time/duration is valid, say:
+  "Thank you! I've noted everything down. Our salesperson will contact you shortly to confirm."
 
 Return ONLY valid JSON:
 {_BOOKING_SCHEMA}
@@ -405,6 +450,22 @@ Return ONLY valid JSON:
         **form,
         **{k: v for k, v in new_collected.items() if v is not None},
     }
+
+    duration_error = _validate_duration_against_time(updated_form)
+
+    if duration_error:
+        return Response(
+            message=duration_error,
+            agent="booking",
+            form=updated_form,
+            complete=False,
+            escalate=False,
+            debug={
+                "duration_validation_failed": True,
+                "requested_time": updated_form.get("requested_time"),
+                "hours_needed": updated_form.get("hours_needed"),
+            },
+        )
 
     resp = Response(
         message=_get(
@@ -558,17 +619,6 @@ def process_message(
         if intent == "booking" or (booking_started and intent != "feedback"):
             resp = run_booking(message, history, form, clf=clf)
 
-            enough_for_urgent_followup = (
-                resp.form.get("customer_name")
-                and resp.form.get("requested_date")
-                and resp.form.get("requested_time")
-            )
-
-            if clf.get("is_emergency") and enough_for_urgent_followup:
-                saved_form = resp.form
-                resp = run_escalation(message, history, {**clf, "form": saved_form})
-                resp.form = saved_form
-
         elif intent == "escalation":
             resp = run_escalation(message, history, clf)
 
@@ -589,6 +639,7 @@ def process_message(
         resp.debug.update(
             {
                 "intent": intent,
+                "agent": resp.agent,
                 "sentiment": clf.get("sentiment"),
                 "urgency": clf.get("urgency"),
                 "confidence": clf.get("confidence"),
@@ -606,9 +657,9 @@ def process_message(
                 "form": resp.form,
             }
         )
-        
-        resp.agent = "booking" if intent == "booking" else resp.agent
-        resp.escalate = False if resp.agent == "booking" else resp.escalate
+
+        if resp.agent == "booking":
+            resp.escalate = False
 
         return _sanitize_no_confirmation(resp)
 
