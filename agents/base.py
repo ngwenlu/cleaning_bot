@@ -1,4 +1,4 @@
-“””
+"""
 Base agent. All agents inherit from this.
 
 Handles:
@@ -7,7 +7,7 @@ Handles:
 - Calling the Claude API
 - Extracting and JSON-parsing the response
 - Logging errors without crashing the app
-  “””
+"""
 
 from **future** import annotations
 
@@ -22,7 +22,7 @@ from models import ConversationMessage
 logger = logging.getLogger(**name**)
 
 class BaseAgent(ABC):
-“””
+"""
 Abstract base for all agents.
 
 ```
