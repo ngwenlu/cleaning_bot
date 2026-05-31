@@ -9,9 +9,10 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import date, datetime, time, timedelta
+from datetime import date, time, timedelta
 
 from dateutil import parser as date_parser
+from dateutil.relativedelta import relativedelta
 
 from config import (
     CLASSIFIER_MAX_TOKENS,
@@ -74,15 +75,13 @@ def _extract_date_text(message: str) -> str | None:
         r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b",
         r"\b\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+\d{2,4}\b",
         r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+\d{1,2},?\s+\d{2,4}\b",
-        r"\btomorrow\b",
         r"\btoday\b",
+        r"\btomorrow\b",
         r"\bnext\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
     ]
 
-    lowered = message.lower()
-
     for pattern in patterns:
-        match = re.search(pattern, lowered, flags=re.IGNORECASE)
+        match = re.search(pattern, message, flags=re.IGNORECASE)
         if match:
             return match.group(0)
 
@@ -177,6 +176,7 @@ Today: {today.isoformat()} ({today.strftime("%A")})
 
 Classify intent and sentiment only.
 Do NOT parse, validate, or reason about dates and times.
+The Python app handles all date/time rules.
 
 Return ONLY valid JSON:
 {_CLASSIFY_SCHEMA}
@@ -195,11 +195,13 @@ Return ONLY valid JSON:
     detected_date = _parse_date(date_text, today)
     detected_time = _parse_time(time_text)
 
+    max_booking_date = today + relativedelta(months=6)
+
     emergency_window = CONFIG.booking.emergency_window_days
     start_hour = CONFIG.hours.start_hour
     end_hour = CONFIG.hours.end_hour
     min_hours = int(CONFIG.booking.min_hours)
-    max_advance_days = CONFIG.booking.max_advance_days
+    latest_start_hour = end_hour - min_hours
 
     delta = (detected_date - today).days if detected_date else None
 
@@ -213,13 +215,8 @@ Return ONLY valid JSON:
         "time_text": time_text,
         "detected_date": detected_date.isoformat() if detected_date else None,
         "detected_time": detected_time.strftime("%H:%M") if detected_time else None,
+        "max_booking_date": max_booking_date.isoformat(),
     }
-
-    clf["is_emergency"] = (
-        detected_date is not None
-        and delta is not None
-        and 0 <= delta <= emergency_window
-    )
 
     clf["date_in_past"] = (
         detected_date is not None
@@ -229,10 +226,19 @@ Return ONLY valid JSON:
 
     clf["date_too_far"] = (
         detected_date is not None
-        and delta is not None
-        and delta > max_advance_days
+        and detected_date > max_booking_date
     )
 
+    clf["is_emergency"] = (
+        detected_date is not None
+        and delta is not None
+        and 0 <= delta <= emergency_window
+        and not clf["date_in_past"]
+        and not clf["date_too_far"]
+    )
+
+    # Example: 8pm is NOT outside 9am-9pm,
+    # but it is too late because 8pm + 3h ends after 9pm.
     clf["time_outside_hours"] = (
         detected_time is not None
         and (
@@ -245,9 +251,9 @@ Return ONLY valid JSON:
         detected_time is not None
         and not clf["time_outside_hours"]
         and (
-            detected_time.hour > (end_hour - min_hours)
+            detected_time.hour > latest_start_hour
             or (
-                detected_time.hour == (end_hour - min_hours)
+                detected_time.hour == latest_start_hour
                 and detected_time.minute > 0
             )
         )
@@ -255,21 +261,18 @@ Return ONLY valid JSON:
 
     clf["date_seems_wrong"] = (
         clf["date_in_past"] and clf["intent"] == "booking"
-    ) or (
-        detected_date is not None
-        and delta is not None
-        and delta > emergency_window
-        and clf["intent"] in ("feedback", "escalation")
     )
-    
+
     log.warning(
-    "DATE DEBUG | raw=%s | parsed=%s | delta=%s | max=%s | too_far=%s",
-    date_text,
-    detected_date,
-    delta,
-    max_advance_days,
-    delta > max_advance_days if delta is not None else None,
-)
+        "DATE DEBUG | text=%s | parsed=%s | max=%s | delta=%s | past=%s | too_far=%s | emergency=%s",
+        date_text,
+        detected_date,
+        max_booking_date,
+        delta,
+        clf["date_in_past"],
+        clf["date_too_far"],
+        clf["is_emergency"],
+    )
 
     return clf
 
@@ -321,38 +324,40 @@ def run_booking(
     if clf:
         if clf.get("date_in_past") and clf.get("detected_date"):
             alerts.append(
-                f"The requested date {clf['detected_date']} is in the past. "
+                f"DATE IN PAST: The requested date {clf['detected_date']} is in the past. "
                 "Reject this date and ask for a future date."
             )
 
         if clf.get("date_too_far") and clf.get("detected_date"):
             alerts.append(
-                f"The requested date {clf['detected_date']} is too far in advance. "
-                f"Customers can only book up to {CONFIG.booking.max_advance_days} days "
-                f"({CONFIG.booking.max_advance_days // 30} months) from today. "
-                "Reject this date and ask for a date within the next 6 months."
+                f"DATE TOO FAR: The requested date {clf['detected_date']} is too far in advance. "
+                f"Customers can only book up to 6 months from today. "
+                f"The latest allowed booking date is {clf.get('max_booking_date')}. "
+                "Reject this date and ask for a date within the next 6 months. "
+                "Do NOT say the date is fine."
             )
 
         if clf.get("is_emergency") and clf.get("detected_date"):
             alerts.append(
-                f"The requested date {clf['detected_date']} is today or tomorrow. "
-                "This is an emergency booking. Set escalate=true."
+                f"EMERGENCY: The requested date {clf['detected_date']} is today or tomorrow. "
+                "Set escalate=true."
             )
 
         if clf.get("time_outside_hours") and clf.get("detected_time"):
             alerts.append(
-                f"The requested time {clf['detected_time']} is outside service hours. "
+                f"TIME OUTSIDE HOURS: The requested time {clf['detected_time']} is outside service hours. "
                 f"Service hours are {CONFIG.hours.start_label} to {CONFIG.hours.end_label}. "
                 "Ask for a time within service hours."
             )
 
         if clf.get("time_too_late") and clf.get("detected_time"):
             alerts.append(
-                f"The requested start time {clf['detected_time']} is too late. "
+                f"TIME TOO LATE: The requested start time {clf['detected_time']} is too late. "
                 f"The latest start time is {CONFIG.hours.latest_start(CONFIG.booking.min_hours)} "
                 f"because the minimum booking is {CONFIG.booking.min_hours:.0f} hours "
-                f"and sessions must finish by {CONFIG.hours.end_label}. "
-                "Reject this time and ask for an earlier start time."
+                f"and all cleaning sessions must finish by {CONFIG.hours.end_label}. "
+                "Reject this time and ask for an earlier start time. "
+                "Do NOT say this is outside service hours."
             )
 
     alerts_text = "\n".join(f"- {alert}" for alert in alerts)
@@ -371,22 +376,18 @@ Required fields: {_BOOKING_REQUIRED}
 Already collected: {json.dumps(filled, default=str)}
 Still missing: {missing}
 
-RULES:
-- Collect required booking details one or two fields at a time.
+STRICT RULES:
+- The PYTHON-VERIFIED DATETIME ALERTS are authoritative.
+- Do NOT override or reinterpret the alerts.
+- If DATE TOO FAR exists, you MUST reject the date because bookings are only allowed up to 6 months from today.
+- If TIME TOO LATE exists, explain that the latest start is 6pm because the minimum booking is 3 hours and cleaning must end by 9pm.
+- 8pm is not "outside service hours"; it is too late as a start time because a 3-hour minimum session would end at 11pm.
 - Never confirm or commit to a booking.
 - A salesperson must confirm all bookings.
-- If datetime alerts are present, handle them first.
-- If multiple datetime alerts are present, handle them in this priority:
-  1. date in past
-  2. date too far ahead
-  3. emergency date
-  4. time outside hours
-  5. time too late
-- If date is too far ahead, explain that customers can only book up to 6 months ahead.
-- If time is too late, explain that the latest start is 6pm because the minimum booking is 3 hours and cleaning must end by 9pm.
+- Collect required booking details one or two fields at a time.
 - If all required fields are collected, say:
   "Thank you! I've noted everything down. Our salesperson will contact you shortly to confirm."
-- Set escalate=true only if the booking date is today or tomorrow.
+- Set escalate=true only if the booking date is today or tomorrow AND the date is valid.
 
 Return ONLY valid JSON:
 {_BOOKING_SCHEMA}
@@ -539,18 +540,18 @@ def process_message(
         )
 
         is_emergency = clf.get("is_emergency", False)
-        date_wrong = clf.get("date_seems_wrong", False)
+        date_invalid = clf.get("date_in_past", False) or clf.get("date_too_far", False)
 
-        if is_emergency:
+        if is_emergency and not date_invalid:
             resp = run_escalation(message, history, clf)
 
-        elif intent == "escalation" or (date_wrong and intent == "feedback"):
+        elif intent == "escalation":
             resp = run_escalation(message, history, clf)
 
         elif intent == "booking" or (booking_started and intent != "feedback"):
             resp = run_booking(message, history, form, clf=clf)
 
-            if resp.escalate:
+            if resp.escalate and not date_invalid:
                 saved_form = resp.form
                 resp = run_escalation(message, history, {**clf, "form": saved_form})
                 resp.form = saved_form
@@ -580,6 +581,7 @@ def process_message(
                 "time_text": clf.get("time_text"),
                 "detected_date": clf.get("detected_date"),
                 "detected_time": clf.get("detected_time"),
+                "max_booking_date": clf.get("max_booking_date"),
                 "is_emergency": clf.get("is_emergency"),
                 "date_in_past": clf.get("date_in_past"),
                 "date_too_far": clf.get("date_too_far"),
