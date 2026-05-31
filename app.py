@@ -282,7 +282,7 @@ st.markdown(
 """,
 unsafe_allow_html=True,
 )
-st.markdown(”—”)
+st.markdown("—")
 
 ```
 # Booking progress (only shown when booking is in progress)
