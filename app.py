@@ -163,13 +163,14 @@ section[data-testid="stSidebar"] h3 {
 
 def _init() -> None:
     defaults = {
-        "session_id": str(uuid.uuid4()),
-        "messages": [],
-        "history": [],
-        "form": {},
-        "last_debug": {},
-        "turn": 1,
-    }
+    "session_id": str(uuid.uuid4()),
+    "messages": [],
+    "history": [],
+    "form": {},
+    "last_debug": {},
+    "debug_log": [],
+    "turn": 1,
+}
 
     for key, value in defaults.items():
         if key not in st.session_state:
