@@ -153,6 +153,51 @@ def _parse_time(time_text: str | None) -> time | None:
         return None
 
 
+def _invalid_datetime_response(clf: dict, form: dict) -> Response | None:
+    messages = []
+
+    if clf.get("date_in_past") and clf.get("detected_date"):
+        messages.append(
+            f"The requested date {clf['detected_date']} has already passed. "
+            "Please choose a future date."
+        )
+
+    if clf.get("date_too_far") and clf.get("detected_date"):
+        messages.append(
+            f"The requested date {clf['detected_date']} is too far in advance. "
+            f"We only accept bookings up to 6 months ahead, until {clf.get('max_booking_date')}. "
+            "Please choose a date within the next 6 months."
+        )
+
+    if clf.get("time_outside_hours") and clf.get("detected_time"):
+        messages.append(
+            f"The requested time {clf['detected_time']} is outside our service hours. "
+            f"Our service hours are {CONFIG.hours.start_label} to {CONFIG.hours.end_label}. "
+            "Please choose a time within this window."
+        )
+
+    if clf.get("time_too_late") and clf.get("detected_time"):
+        messages.append(
+            f"The requested start time {clf['detected_time']} is too late. "
+            f"The minimum booking is {CONFIG.booking.min_hours:.0f} hours, "
+            f"and all sessions must finish by {CONFIG.hours.end_label}. "
+            f"So the latest start time is {CONFIG.hours.latest_start(CONFIG.booking.min_hours)}. "
+            "Please choose an earlier start time."
+        )
+
+    if not messages:
+        return None
+
+    return Response(
+        message=" ".join(messages),
+        agent="booking",
+        form=form,
+        complete=False,
+        escalate=False,
+        debug={"blocked_by_python_validation": True},
+    )
+
+
 _CLASSIFY_SCHEMA = json.dumps(
     {
         "intent": "booking | faq | escalation | feedback | out_of_scope",
@@ -237,8 +282,6 @@ Return ONLY valid JSON:
         and not clf["date_too_far"]
     )
 
-    # Example: 8pm is NOT outside 9am-9pm,
-    # but it is too late because 8pm + 3h ends after 9pm.
     clf["time_outside_hours"] = (
         detected_time is not None
         and (
@@ -257,21 +300,6 @@ Return ONLY valid JSON:
                 and detected_time.minute > 0
             )
         )
-    )
-
-    clf["date_seems_wrong"] = (
-        clf["date_in_past"] and clf["intent"] == "booking"
-    )
-
-    log.warning(
-        "DATE DEBUG | text=%s | parsed=%s | max=%s | delta=%s | past=%s | too_far=%s | emergency=%s",
-        date_text,
-        detected_date,
-        max_booking_date,
-        delta,
-        clf["date_in_past"],
-        clf["date_too_far"],
-        clf["is_emergency"],
     )
 
     return clf
@@ -314,80 +342,25 @@ def run_booking(
     form: dict,
     clf: dict | None = None,
 ) -> Response:
-    today = date.today()
-
     filled = {k: v for k, v in form.items() if v is not None}
     missing = [k for k in _BOOKING_REQUIRED if form.get(k) is None]
 
-    alerts = []
-
-    if clf:
-        if clf.get("date_in_past") and clf.get("detected_date"):
-            alerts.append(
-                f"DATE IN PAST: The requested date {clf['detected_date']} is in the past. "
-                "Reject this date and ask for a future date."
-            )
-
-        if clf.get("date_too_far") and clf.get("detected_date"):
-            alerts.append(
-                f"DATE TOO FAR: The requested date {clf['detected_date']} is too far in advance. "
-                f"Customers can only book up to 6 months from today. "
-                f"The latest allowed booking date is {clf.get('max_booking_date')}. "
-                "Reject this date and ask for a date within the next 6 months. "
-                "Do NOT say the date is fine."
-            )
-
-        if clf.get("is_emergency") and clf.get("detected_date"):
-            alerts.append(
-                f"EMERGENCY: The requested date {clf['detected_date']} is today or tomorrow. "
-                "Set escalate=true."
-            )
-
-        if clf.get("time_outside_hours") and clf.get("detected_time"):
-            alerts.append(
-                f"TIME OUTSIDE HOURS: The requested time {clf['detected_time']} is outside service hours. "
-                f"Service hours are {CONFIG.hours.start_label} to {CONFIG.hours.end_label}. "
-                "Ask for a time within service hours."
-            )
-
-        if clf.get("time_too_late") and clf.get("detected_time"):
-            alerts.append(
-                f"TIME TOO LATE: The requested start time {clf['detected_time']} is too late. "
-                f"The latest start time is {CONFIG.hours.latest_start(CONFIG.booking.min_hours)} "
-                f"because the minimum booking is {CONFIG.booking.min_hours:.0f} hours "
-                f"and all cleaning sessions must finish by {CONFIG.hours.end_label}. "
-                "Reject this time and ask for an earlier start time. "
-                "Do NOT say this is outside service hours."
-            )
-
-    alerts_text = "\n".join(f"- {alert}" for alert in alerts)
-
     system = f"""You are the booking assistant for a cleaning service.
 
-Today: {today.isoformat()} ({today.strftime("%A")})
-
 {CONFIG.rules_for_agents()}
-
-PYTHON-VERIFIED DATETIME ALERTS:
-{alerts_text if alerts_text else "None"}
 
 FORM STATE:
 Required fields: {_BOOKING_REQUIRED}
 Already collected: {json.dumps(filled, default=str)}
 Still missing: {missing}
 
-STRICT RULES:
-- The PYTHON-VERIFIED DATETIME ALERTS are authoritative.
-- Do NOT override or reinterpret the alerts.
-- If DATE TOO FAR exists, you MUST reject the date because bookings are only allowed up to 6 months from today.
-- If TIME TOO LATE exists, explain that the latest start is 6pm because the minimum booking is 3 hours and cleaning must end by 9pm.
-- 8pm is not "outside service hours"; it is too late as a start time because a 3-hour minimum session would end at 11pm.
+RULES:
+- Collect required booking details one or two fields at a time.
 - Never confirm or commit to a booking.
 - A salesperson must confirm all bookings.
-- Collect required booking details one or two fields at a time.
 - If all required fields are collected, say:
   "Thank you! I've noted everything down. Our salesperson will contact you shortly to confirm."
-- Set escalate=true only if the booking date is today or tomorrow AND the date is valid.
+- Set escalate=true only if the booking date is today or tomorrow.
 
 Return ONLY valid JSON:
 {_BOOKING_SCHEMA}
@@ -497,7 +470,6 @@ RULES:
 - Emergency booking today/tomorrow: reassure the customer and say the team will WhatsApp them shortly. Set urgency=critical.
 - Complaint or negative feedback: empathise and promise human follow-up. Set urgency=high.
 - Unanswerable FAQ: politely say you will connect them with the team. Set urgency=routine.
-- Invalid date/time: explain clearly and ask the customer to clarify. Do not treat as urgent unless today/tomorrow.
 
 Return ONLY valid JSON:
 {_ESCALATION_SCHEMA}
@@ -529,6 +501,12 @@ def process_message(
         clf = classify(message, history)
         intent = clf["intent"]
 
+        invalid_resp = _invalid_datetime_response(clf, form)
+        if invalid_resp is not None:
+            invalid_resp.intent = intent
+            invalid_resp.debug.update(clf)
+            return invalid_resp
+
         booking_started = any(
             form.get(k)
             for k in [
@@ -539,10 +517,7 @@ def process_message(
             ]
         )
 
-        is_emergency = clf.get("is_emergency", False)
-        date_invalid = clf.get("date_in_past", False) or clf.get("date_too_far", False)
-
-        if is_emergency and not date_invalid:
+        if clf.get("is_emergency", False):
             resp = run_escalation(message, history, clf)
 
         elif intent == "escalation":
@@ -551,7 +526,7 @@ def process_message(
         elif intent == "booking" or (booking_started and intent != "feedback"):
             resp = run_booking(message, history, form, clf=clf)
 
-            if resp.escalate and not date_invalid:
+            if resp.escalate:
                 saved_form = resp.form
                 resp = run_escalation(message, history, {**clf, "form": saved_form})
                 resp.form = saved_form
