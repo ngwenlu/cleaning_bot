@@ -13,6 +13,7 @@ from datetime import date
 
 from agents.base import BaseAgent
 from config import CLASSIFIER_MAX_TOKENS, CLASSIFIER_MODEL
+from knowledge_base import CONFIG as _CONFIG
 from models import ConversationMessage, IntentClassification
 
 
@@ -28,6 +29,7 @@ _SCHEMA = json.dumps(
         "reasoning": "one sentence explaining the classification",
         "is_emergency": "boolean, true if booking date is today or tomorrow",
         "detected_date": "ISO date string YYYY-MM-DD if user mentioned a date, else null",
+        "detected_time": "24hr time string HH:MM if user mentioned a specific time, else null",
         "date_seems_wrong": "boolean, true if the date is logically inconsistent with the intent",
     },
     indent=2,
@@ -60,14 +62,12 @@ Today's date is {today}.
 {_INTENT_DESCRIPTIONS}
 
 Sentiment:
-
 - positive -> satisfied, grateful, happy
 - neutral  -> factual, no strong emotion
 - negative -> frustrated, upset, angry
 - urgent   -> explicit time pressure, distress, emergencies
 
 Urgency:
-
 - routine  -> normal enquiry or FAQ
 - high     -> complaint or strong negative sentiment
 - critical -> emergency booking, safety concern, or explicit distress
@@ -80,10 +80,21 @@ set:
 - intent=emergency_booking
 - urgency=critical
 
+Service hours rule:
+Refer to the BUSINESS RULES below for the exact service window.
+If the user mentions a time outside that window:
+- still capture it in detected_time
+- set is_emergency=false
+- set intent=faq
+- set urgency=routine
+This lets the bot explain the service hours instead of escalating.
+
 Date mismatch rule:
 - If the user wants to book cleaning but gives a past date, set date_seems_wrong=true.
 - If the user gives complaint or feedback about a future date, set date_seems_wrong=true.
 - If the date is valid and logically consistent, set date_seems_wrong=false.
+
+{_CONFIG.rules_for_agents()}
 
 Respond ONLY with a valid JSON object matching this schema.
 No preamble.
