@@ -1,11 +1,132 @@
 """
-Static knowledge base for the FAQ Agent.
-Each entry has a key, a list of trigger topics, and the answer.
+knowledge_base.py – Single source of truth for ALL business rules and FAQ content.
+
+To change any business rule such as hours, pricing, cancellation policy:
+1. Edit the relevant field inside BusinessConfig below.
+2. Done. All agents, validators, and FAQ answers update automatically.
+
+To add a new FAQ topic:
+1. Add a KBEntry to KNOWLEDGE_BASE below.
+2. Done. The FAQ agent picks it up on next deploy.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+
+@dataclass
+class ServiceHours:
+    start_hour: int = 9
+    end_hour: int = 21
+    days: str = "7 days a week"
+
+    @property
+    def start_label(self) -> str:
+        hour = self.start_hour
+        return f"{hour % 12 or 12}{'am' if hour < 12 else 'pm'}"
+
+    @property
+    def end_label(self) -> str:
+        hour = self.end_hour
+        return f"{hour % 12 or 12}{'am' if hour < 12 else 'pm'}"
+
+    @property
+    def latest_start_for(self) -> str:
+        return (
+            f"Sessions must finish by {self.end_label}, so the latest start time "
+            f"depends on how many hours are needed. For example, a 3-hour session "
+            f"must start by {(self.end_hour - 3) % 12 or 12}pm."
+        )
+
+
+@dataclass
+class Pricing:
+    hourly_rate: int = 20
+    currency: str = "SGD"
+
+    @property
+    def description(self) -> str:
+        return (
+            f"${self.hourly_rate} {self.currency} per hour "
+            f"(flat rate, no variation by home size or location)"
+        )
+
+
+@dataclass
+class CancellationPolicy:
+    notice_hours: int = 24
+    late_fee_pct: int = 50
+
+
+@dataclass
+class BookingRules:
+    emergency_window_days: int = 1
+    customer_provides_supplies: bool = True
+    required_supplies: list[str] = field(
+        default_factory=lambda: [
+            "Mop and bucket",
+            "Vacuum cleaner",
+            "Broom and dustpan",
+            "Floor cleaner / detergent",
+            "Toilet cleaner and scrubber",
+            "Microfibre cloths or old rags",
+            "Rubber gloves for the cleaner",
+        ]
+    )
+
+
+@dataclass
+class BusinessConfig:
+    company_name: str = "Dad's Cleaning Services"
+    service_areas: str = "all areas in Singapore"
+    payment_methods: list[str] = field(default_factory=lambda: ["Cash", "PayNow"])
+    hours: ServiceHours = field(default_factory=ServiceHours)
+    pricing: Pricing = field(default_factory=Pricing)
+    cancellation: CancellationPolicy = field(default_factory=CancellationPolicy)
+    booking: BookingRules = field(default_factory=BookingRules)
+
+    def rules_for_agents(self) -> str:
+        h = self.hours
+        p = self.pricing
+        c = self.cancellation
+        b = self.booking
+
+        supplies_list = "\n".join(f"    - {item}" for item in b.required_supplies)
+        payment_methods = ", ".join(self.payment_methods)
+
+        return f"""
+=== BUSINESS RULES: AUTHORITATIVE ===
+
+Company: {self.company_name}
+Service area: {self.service_areas}
+Payment: {payment_methods}
+
+SERVICE HOURS:
+Open: {h.start_label} to {h.end_label}, {h.days}
+Start time: no earlier than {h.start_label}
+End time: no later than {h.end_label}. Sessions must finish by {h.end_label}.
+{h.latest_start_for}
+Any time outside {h.start_label} to {h.end_label} must be politely rejected.
+
+PRICING:
+{p.description}
+
+CANCELLATION POLICY:
+Notice required: {c.notice_hours} hours before the session
+Late fee: {c.late_fee_pct}% of session cost if cancelled with less than {c.notice_hours} hours notice
+
+BOOKING RULES:
+Emergency booking: any session for today or within the next {b.emergency_window_days} day(s)
+Supplies: customer provides ALL cleaning supplies. Cleaners bring NOTHING.
+Required supplies the customer must prepare:
+{supplies_list}
+
+=== END BUSINESS RULES ===
+""".strip()
+
+
+CONFIG = BusinessConfig()
 
 
 @dataclass
@@ -17,6 +138,29 @@ class KBEntry:
 
 KNOWLEDGE_BASE: list[KBEntry] = [
     KBEntry(
+        key="service_hours",
+        topics=[
+            "hours",
+            "time",
+            "when",
+            "available",
+            "availability",
+            "early",
+            "late",
+            "am",
+            "pm",
+            "open",
+            "3am",
+            "midnight",
+        ],
+        answer=(
+            f"Our cleaners are available from {CONFIG.hours.start_label} to "
+            f"{CONFIG.hours.end_label}, {CONFIG.hours.days}. "
+            f"{CONFIG.hours.latest_start_for} "
+            "We cannot accommodate requests outside these hours."
+        ),
+    ),
+    KBEntry(
         key="service_type",
         topics=[
             "service",
@@ -25,8 +169,8 @@ KNOWLEDGE_BASE: list[KBEntry] = [
         ],
         answer=(
             "We offer part-time cleaning where our cleaners come to your home or office. "
-            "You will need to provide all cleaning supplies (mop, vacuum, detergents, cloths, etc.). "
-            "We do not bring any equipment or products."
+            "You will need to provide all cleaning supplies. "
+            "Our cleaners do not bring any equipment or products."
         ),
     ),
     KBEntry(
@@ -39,15 +183,8 @@ KNOWLEDGE_BASE: list[KBEntry] = [
         ],
         answer=(
             "Please prepare the following before the cleaner arrives:\n"
-            "* Mop and bucket\n"
-            "* Vacuum cleaner\n"
-            "* Broom and dustpan\n"
-            "* Floor cleaner / detergent\n"
-            "* Toilet cleaner and scrubber\n"
-            "* Glass cleaner (optional)\n"
-            "* Microfibre cloths or old rags\n"
-            "* Rubber gloves for the cleaner\n\n"
-            "If any supplies are missing, the cleaner may not be able to complete certain tasks."
+            + "\n".join(f"- {item}" for item in CONFIG.booking.required_supplies)
+            + "\n\nIf any supplies are missing, the cleaner may not be able to complete certain tasks."
         ),
     ),
     KBEntry(
@@ -63,11 +200,11 @@ KNOWLEDGE_BASE: list[KBEntry] = [
             "room",
         ],
         answer=(
-            "Our rate is a flat $20 per hour regardless of home size, number of rooms, or location. "
+            f"Our rate is {CONFIG.pricing.description}. "
             "The total cost depends only on how many hours the job takes. "
-            "For example, a 3-hour session costs $60 and a 4-hour session costs $80. "
-            "The number of hours needed is estimated when you make your booking, "
-            "and final pricing is confirmed by our salesperson."
+            f"For example, a 3-hour session costs ${CONFIG.pricing.hourly_rate * 3} "
+            f"and a 4-hour session costs ${CONFIG.pricing.hourly_rate * 4}. "
+            "Final pricing is confirmed by our salesperson after reviewing your details."
         ),
     ),
     KBEntry(
@@ -80,11 +217,10 @@ KNOWLEDGE_BASE: list[KBEntry] = [
         ],
         answer=(
             "Here's how it works:\n"
-            "1. You share your details with our chatbot (date, address, home size, hours needed).\n"
+            "1. You share your details with our chatbot, including date, address, home size, and hours needed.\n"
             "2. Our salesperson reviews your request and contacts you to confirm the slot.\n"
             "3. Once confirmed, we send the cleaner to your place at the agreed time.\n\n"
-            "Note: Bookings are NOT confirmed through this chat. "
-            "A human salesperson will reach out to you."
+            "Note: Bookings are NOT confirmed through this chat. A human salesperson will reach out to you."
         ),
     ),
     KBEntry(
@@ -96,8 +232,10 @@ KNOWLEDGE_BASE: list[KBEntry] = [
             "postpone",
         ],
         answer=(
-            "Cancellations or reschedules must be done at least 24 hours before the scheduled session. "
-            "Late cancellations under 24 hours may incur a 50% cancellation fee. "
+            f"Cancellations or reschedules must be made at least "
+            f"{CONFIG.cancellation.notice_hours} hours before the scheduled session. "
+            f"Late cancellations under {CONFIG.cancellation.notice_hours} hours may incur a "
+            f"{CONFIG.cancellation.late_fee_pct}% cancellation fee. "
             "To cancel or reschedule, please contact us via WhatsApp or reply to your booking confirmation."
         ),
     ),
@@ -111,8 +249,8 @@ KNOWLEDGE_BASE: list[KBEntry] = [
             "coverage",
         ],
         answer=(
-            "We currently serve all areas in Singapore including HDB estates, condominiums, "
-            "landed properties, and small offices. There are no area restrictions."
+            f"We currently serve {CONFIG.service_areas}, including HDB estates, "
+            "condominiums, landed properties, and small offices."
         ),
     ),
     KBEntry(
@@ -140,10 +278,8 @@ KNOWLEDGE_BASE: list[KBEntry] = [
             "ad hoc",
         ],
         answer=(
-            "We offer both one-time and recurring cleaning sessions "
-            "(weekly, fortnightly, or monthly). "
-            "Recurring sessions are arranged directly with the salesperson "
-            "and may qualify for a discount."
+            "We offer both one-time and recurring cleaning sessions, including weekly, fortnightly, or monthly. "
+            "Recurring sessions are arranged directly with the salesperson and may qualify for a discount."
         ),
     ),
     KBEntry(
@@ -157,17 +293,14 @@ KNOWLEDGE_BASE: list[KBEntry] = [
         ],
         answer=(
             "Payment is made directly to the cleaner after the session. "
-            "Accepted methods include Cash and PayNow."
+            f"Accepted methods: {', '.join(CONFIG.payment_methods)}."
         ),
     ),
 ]
 
 
 def get_full_kb_text() -> str:
-    """
-    Return the full knowledge base as a formatted string
-    for injection into prompts.
-    """
+    """Return the full knowledge base as formatted text for injection into prompts."""
     lines: list[str] = []
 
     for entry in KNOWLEDGE_BASE:
