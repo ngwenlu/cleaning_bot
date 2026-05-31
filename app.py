@@ -460,10 +460,34 @@ if prompt := st.chat_input("Type your message..."):
                 form=st.session_state.form,
             )
             agent = response.agent or "system"
+
             response.debug["agent"] = agent
             response.debug["escalate"] = response.escalate
+            response.debug["complete"] = response.complete
             response.debug["message_preview"] = response.message[:300]
             response.debug["form"] = response.form
+
+            print("=" * 80, flush=True)
+            print("UI DEBUG RESPONSE", flush=True)
+            print("AGENT:", agent, flush=True)
+            print("ESCALATE:", response.escalate, flush=True)
+            print("COMPLETE:", response.complete, flush=True)
+            print("MESSAGE:", response.message, flush=True)
+            print(
+    "DEBUG:",
+    json.dumps(response.debug, indent=2, default=str),
+    flush=True,
+)
+            print("=" * 80, flush=True)
+
+st.session_state.debug_log.append(
+    {
+        "turn": st.session_state.turn,
+        "user": prompt,
+        "agent": agent,
+        "debug": response.debug.copy(),
+    }
+)
 
         _render_assistant(
             _badge(agent),
