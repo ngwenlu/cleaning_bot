@@ -12,7 +12,7 @@ class KBEntry:
     topics:  list[str]   # used in FAQAgentResponse.sources
     answer:  str
     
-    KNOWLEDGE_BASE: list[KBEntry] = [
+KNOWLEDGE_BASE: list[KBEntry] = [
 KBEntry(
 key="service_type",
 topics=["service", "what do you offer", "cleaning type"],
