@@ -3,7 +3,7 @@ Pydantic models for the cleaning company multiagent chatbot.
 All agent outputs are standardised through these schemas.
 “””
 
-from *future* import annotations
+from **future** import annotations
 
 from datetime import date, datetime, time
 from enum import Enum
@@ -19,9 +19,9 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 class Intent(str, Enum):
 “”“Top-level intent categories produced by the intent classifier.”””
 BOOKING_ENQUIRY   = “booking_enquiry”    # wants to make a booking (non-urgent)
-EMERGENCY_BOOKING = “emergency_booking”  # same-day or next-day booking → human immediately
+EMERGENCY_BOOKING = “emergency_booking”  # same-day or next-day booking -> human immediately
 FAQ               = “faq”                # general questions about the service
-COMPLAINT         = “complaint”          # unhappy with service → escalate
+COMPLAINT         = “complaint”          # unhappy with service -> escalate
 FEEDBACK          = “feedback”           # post-service feedback
 ESCALATION        = “escalation”         # explicit request for human / unclear danger
 OUT_OF_SCOPE      = “out_of_scope”       # unrelated to the business
@@ -79,7 +79,7 @@ name:           Optional[str] = None
 phone:          Optional[str] = None
 email:          Optional[str] = None
 
-
+```
 @field_validator("phone")
 @classmethod
 def validate_sg_phone(cls, v: Optional[str]) -> Optional[str]:
@@ -90,7 +90,7 @@ def validate_sg_phone(cls, v: Optional[str]) -> Optional[str]:
     if not (digits.isdigit() and len(digits) in (8, 10)):
         raise ValueError("Phone must be a valid Singapore number (8 digits or +65xxxxxxxx).")
     return v
-
+```
 
 # —————————————————————————
 
@@ -117,7 +117,7 @@ None,
 description=“Booking date explicitly mentioned by the user, if any”
 )
 
-
+```
 @model_validator(mode="after")
 def sync_emergency_flag(self) -> "IntentClassification":
     """If the detected date is today or tomorrow, force emergency."""
@@ -128,7 +128,7 @@ def sync_emergency_flag(self) -> "IntentClassification":
             self.intent = Intent.EMERGENCY_BOOKING
             self.urgency = UrgencyLevel.CRITICAL
     return self
-
+```
 
 # —————————————————————————
 
@@ -139,7 +139,7 @@ def sync_emergency_flag(self) -> "IntentClassification":
 class BookingDetails(BaseModel):
 “””
 Lead / booking details collected by the Booking Agent.
-All fields are optional — the agent fills them in progressively
+All fields are optional – the agent fills them in progressively
 across conversation turns. Nothing is confirmed here.
 “””
 customer:           CustomerInfo  = Field(default_factory=CustomerInfo)
@@ -156,8 +156,8 @@ False,
 description=“Customer has acknowledged they will provide all cleaning supplies”
 )
 
-
-# Computed flag — set by validator, not user input
+```
+# Computed flag -- set by validator, not user input
 is_emergency:       bool = False
 
 @model_validator(mode="after")
@@ -179,7 +179,7 @@ def missing_fields(self) -> list[str]:
     if not (self.customer.phone or self.customer.email):
         missing.append("customer.phone_or_email")
     return missing
-
+```
 
 class BookingAgentResponse(BaseModel):
 “”“Output returned by the Booking Agent each turn.”””
@@ -277,14 +277,14 @@ None,
 description=“Internal note explaining the routing decision”
 )
 
-
+```
 @model_validator(mode="after")
 def enforce_emergency_routing(self) -> "OrchestratorDecision":
     """Emergency bookings must always route to escalation, no exceptions."""
     if self.classification.is_emergency:
         self.route_to = AgentType.ESCALATION
     return self
-
+```
 
 # —————————————————————————
 
