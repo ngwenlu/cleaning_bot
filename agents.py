@@ -519,6 +519,107 @@ Return ONLY valid JSON:
 
     return resp
 
+def run_booking(
+    message: str,
+    history: list[dict],
+    form: dict,
+    clf: dict | None = None,
+) -> Response:
+    filled = {k: v for k, v in form.items() if v is not None}
+    missing = [k for k in _BOOKING_REQUIRED if form.get(k) is None]
+
+    system = f"""You are the booking assistant for a cleaning service.
+
+{CONFIG.rules_for_agents()}
+
+FORM STATE:
+Required fields: {_BOOKING_REQUIRED}
+Already collected: {json.dumps(filled, default=str)}
+Still missing: {missing}
+
+CURRENT CLASSIFIER CONTEXT:
+{json.dumps(clf or {}, indent=2, default=str)}
+
+RULES:
+- Extract any booking details the user provides.
+- Never confirm or commit to a booking.
+- Never say "confirmed".
+- A salesperson must confirm all bookings.
+- Always set escalate=false.
+- Return collected fields in JSON.
+
+Return ONLY valid JSON:
+{_BOOKING_SCHEMA}
+"""
+
+    raw = _llm(system, history + [{"role": "user", "content": message}])
+
+    new_collected = raw.get("collected") or {}
+
+    updated_form = {
+        **form,
+        **{k: v for k, v in new_collected.items() if v is not None},
+    }
+
+    duration_error = _validate_duration_against_time(updated_form)
+
+    if duration_error:
+        return Response(
+            message=duration_error,
+            agent="booking",
+            form=updated_form,
+            complete=False,
+            escalate=False,
+            debug={
+                "duration_validation_failed": True,
+                "requested_time": updated_form.get("requested_time"),
+                "hours_needed": updated_form.get("hours_needed"),
+            },
+        )
+
+    missing_after = [k for k in _BOOKING_REQUIRED if updated_form.get(k) is None]
+
+    question_map = {
+        "customer_name": "Please provide your name.",
+        "address": "Please provide the cleaning address.",
+        "requested_date": "What date would you like the cleaning?",
+        "requested_time": "What start time would you prefer?",
+        "hours_needed": "How many hours do you need?",
+        "has_pets": "Do you have any pets at the property?",
+    }
+
+    if missing_after:
+        next_field = missing_after[0]
+
+        return Response(
+            message=question_map[next_field],
+            agent="booking",
+            form=updated_form,
+            complete=False,
+            escalate=False,
+            debug={
+                "next_field": next_field,
+                "missing_fields": missing_after,
+                "forced_booking_flow": True,
+            },
+        )
+
+    return Response(
+        message=(
+            "Thank you! I’ve noted everything down. "
+            "Our salesperson will contact you shortly to confirm availability."
+        ),
+        agent="booking",
+        form=updated_form,
+        complete=True,
+        escalate=False,
+        debug={
+            "next_field": None,
+            "missing_fields": [],
+            "forced_booking_flow": True,
+        },
+    )
+
 
 _FAQ_SCHEMA = json.dumps(
     {
