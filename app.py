@@ -1,6 +1,6 @@
 """
-app.py – Streamlit UI for the Cleaning Company Multiagent Chatbot
-Run: streamlit run app.py
+app.py – Streamlit UI for the Cleaning Company Chatbot.
+Calls agents.process_message(); has no business logic of its own.
 """
 
 from __future__ import annotations
@@ -16,16 +16,7 @@ from dotenv import load_dotenv
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 load_dotenv()
 
-from agents.orchestrator import process_message
-from models import (
-    AgentType,
-    BookingAgentResponse,
-    BookingDetails,
-    ConversationMessage,
-    EscalationRequest,
-    FAQAgentResponse,
-    FollowUpAgentResponse,
-)
+from agents import Response, process_message
 
 
 st.set_page_config(
@@ -65,54 +56,44 @@ section[data-testid="stSidebar"] h3 {
     font-family: 'DM Serif Display', serif !important;
 }
 
-section[data-testid="stSidebar"] .stMarkdown hr {
-    border-color: rgba(255,255,255,0.12);
-}
-
-.stChatMessage {
-    border-radius: 14px;
-    padding: 4px 8px;
-}
-
 .agent-badge {
     display: inline-block;
     font-size: 10px;
     font-weight: 600;
-    letter-spacing: 0.08em;
+    letter-spacing: .08em;
     text-transform: uppercase;
     padding: 2px 8px;
     border-radius: 999px;
-    margin-bottom: 6px;
+    margin-bottom: 4px;
 }
 
 .badge-booking { background: #DBEAFE; color: #1D4ED8; }
 .badge-faq { background: #D1FAE5; color: #065F46; }
 .badge-escalation { background: #FEE2E2; color: #991B1B; }
-.badge-followup { background: #FEF3C7; color: #92400E; }
 .badge-system { background: #F3F4F6; color: #374151; }
 
-.escalation-box {
-    color: #1C1C1C;
-    background: #FFF5F5;
+.alert-box {
     border-left: 4px solid #EF4444;
+    background: #FFF5F5;
     border-radius: 0 10px 10px 0;
     padding: 12px 16px;
-    margin-top: 4px;
+    margin-top: 6px;
+    color: #1C1C1C;
     line-height: 1.6;
 }
 
-.emergency-box {
-    color: #1C1C1C;
-    background: #FFF7ED;
+.alert-urgent {
     border-left: 4px solid #F97316;
+    background: #FFF7ED;
     border-radius: 0 10px 10px 0;
     padding: 12px 16px;
-    margin-top: 4px;
+    margin-top: 6px;
+    color: #1C1C1C;
     line-height: 1.6;
 }
 
 .progress-card {
-    background: rgba(255,255,255,0.07);
+    background: rgba(255,255,255,.07);
     border-radius: 10px;
     padding: 12px 14px;
     margin-top: 8px;
@@ -126,8 +107,13 @@ section[data-testid="stSidebar"] .stMarkdown hr {
     padding: 3px 0;
 }
 
-.check-done { color: #4ADE80; font-size: 14px; }
-.check-empty { color: #6B7280; font-size: 14px; }
+.check-done {
+    color: #4ADE80;
+}
+
+.check-empty {
+    color: #6B7280;
+}
 
 .company-header {
     text-align: center;
@@ -151,7 +137,7 @@ section[data-testid="stSidebar"] .stMarkdown hr {
 .company-tagline {
     font-size: 12px;
     color: #9BBFB3 !important;
-    letter-spacing: 0.05em;
+    letter-spacing: .05em;
 }
 
 .debug-row {
@@ -167,10 +153,6 @@ section[data-testid="stSidebar"] .stMarkdown hr {
     font-weight: 500;
 }
 
-.stChatInputContainer {
-    border-top: 1px solid #E5E0D8;
-}
-
 #MainMenu, footer, header {
     visibility: hidden;
 }
@@ -180,117 +162,61 @@ section[data-testid="stSidebar"] .stMarkdown hr {
 )
 
 
-def _init_state() -> None:
-    if "session_id" not in st.session_state:
-        st.session_state.session_id = str(uuid.uuid4())
-
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-
-    if "history" not in st.session_state:
-        st.session_state.history = []
-
-    if "booking_details" not in st.session_state:
-        st.session_state.booking_details = None
-
-    if "turn_number" not in st.session_state:
-        st.session_state.turn_number = 1
-
-    if "last_classification" not in st.session_state:
-        st.session_state.last_classification = None
-
-
-_init_state()
-
-
-def _agent_badge(agent_type: AgentType | str | None) -> str:
-    labels = {
-        AgentType.BOOKING: ("BOOKING", "badge-booking"),
-        AgentType.FAQ: ("FAQ", "badge-faq"),
-        AgentType.ESCALATION: ("URGENT", "badge-escalation"),
-        AgentType.FOLLOW_UP: ("FOLLOW UP", "badge-followup"),
-        AgentType.ORCHESTRATOR: ("SYSTEM", "badge-system"),
+def _init() -> None:
+    defaults = {
+        "session_id": str(uuid.uuid4()),
+        "messages": [],
+        "history": [],
+        "form": {},
+        "last_debug": {},
+        "turn": 1,
     }
 
-    if agent_type is None:
-        return ""
-
-    try:
-        key = agent_type if isinstance(agent_type, AgentType) else AgentType(agent_type)
-    except Exception:
-        key = AgentType.ORCHESTRATOR
-
-    label, css_class = labels.get(key, ("AGENT", "badge-system"))
-    return f'<span class="agent-badge {css_class}">{label}</span>'
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
 
 
-def _render_booking_progress(bd: BookingDetails) -> None:
-    fields = [
-        ("Name", bd.customer_name),
-        ("Address", bd.address),
-        ("Date", str(bd.requested_date) if bd.requested_date else None),
-        ("Start time", str(bd.requested_time)[:5] if bd.requested_time else None),
-        ("Hours", str(bd.hours_needed) if bd.hours_needed else None),
-        (
-            "Pets",
-            "Yes" if bd.has_pets is True else ("No" if bd.has_pets is False else None),
-        ),
-        ("Contact", bd.contact),
-    ]
-
-    rows = ""
-    filled = sum(1 for _, value in fields if value)
-
-    for label, value in fields:
-        icon = (
-            '<span class="check-done">O</span>'
-            if value
-            else '<span class="check-empty">o</span>'
-        )
-        display = (
-            f"<b style='color:#E8F0ED'>{_html.escape(str(value))}</b>"
-            if value
-            else "<span style='color:#6B7280'>-</span>"
-        )
-        rows += (
-            f'<div class="progress-row">{icon} '
-            f'<span style="flex:1">{_html.escape(label)}</span>{display}</div>'
-        )
-
-    pct = int(filled / len(fields) * 100)
-
-    st.markdown(
-        f"""
-<div class="progress-card">
-    <div style="font-size:11px;letter-spacing:.07em;color:#9BBFB3;margin-bottom:6px">
-        BOOKING FORM &nbsp;.&nbsp; {filled}/{len(fields)} fields
-    </div>
-    <div style="background:rgba(255,255,255,.1);border-radius:999px;height:4px;margin-bottom:10px">
-        <div style="background:#4ADE80;width:{pct}%;height:4px;border-radius:999px;transition:width .4s"></div>
-    </div>
-    {rows}
-</div>
-""",
-        unsafe_allow_html=True,
-    )
+_init()
 
 
-def _render_assistant_msg(
+_BADGE_CSS = {
+    "booking": "badge-booking",
+    "faq": "badge-faq",
+    "escalation": "badge-escalation",
+    "system": "badge-system",
+}
+
+_BADGE_LABEL = {
+    "booking": "BOOKING",
+    "faq": "FAQ",
+    "escalation": "URGENT",
+    "system": "SYSTEM",
+}
+
+
+def _badge(agent: str) -> str:
+    css = _BADGE_CSS.get(agent, "badge-system")
+    label = _BADGE_LABEL.get(agent, agent.upper())
+    return f'<span class="agent-badge {css}">{label}</span>'
+
+
+def _render_assistant(
     badge_html: str,
     body: str,
-    box_class: str = "",
+    agent: str,
 ) -> None:
-    safe_body = _html.escape(body or "").replace("\n", "<br>")
+    if body:
+        safe = _html.escape(body).replace("\n", "<br>")
+    else:
+        safe = "<em style='color:#9CA3AF'>No response</em>"
 
-    if not safe_body:
-        safe_body = "<em style='color:#9CA3AF'>No response</em>"
-
-    if box_class:
-        inner = f'<div class="{box_class}" style="margin-top:6px">{safe_body}</div>'
+    if agent == "escalation":
+        inner = f'<div class="alert-box" style="margin-top:6px">{safe}</div>'
     else:
         inner = (
             '<p style="margin:6px 0 0 0;font-size:15px;'
-            f'color:#1C1C1C;line-height:1.6">{safe_body}</p>'
+            f'color:#1C1C1C;line-height:1.6">{safe}</p>'
         )
 
     st.markdown(
@@ -301,23 +227,78 @@ def _render_assistant_msg(
 
 def _render_message(msg: dict) -> None:
     role = msg["role"]
-    content = msg.get("content") or ""
-    agent_type = msg.get("agent_type")
-    metadata = msg.get("metadata", {})
-    is_emergency = metadata.get("is_emergency", False)
+    content = msg.get("content", "")
+    agent = msg.get("agent", "faq")
 
-    with st.chat_message(role, avatar="🧹" if role == "assistant" else "👤"):
-        if role != "assistant":
+    with st.chat_message(
+        role,
+        avatar="🧹" if role == "assistant" else "👤",
+    ):
+        if role == "user":
             st.markdown(content)
-            return
-
-        badge = _agent_badge(agent_type)
-
-        if agent_type == AgentType.ESCALATION:
-            box_class = "emergency-box" if is_emergency else "escalation-box"
-            _render_assistant_msg(badge, content, box_class)
         else:
-            _render_assistant_msg(badge, content)
+            _render_assistant(
+                _badge(agent),
+                content,
+                agent,
+            )
+
+
+def _render_form_progress(form: dict) -> None:
+    fields = [
+        ("Name", form.get("customer_name")),
+        ("Address", form.get("address")),
+        ("Date", form.get("requested_date")),
+        ("Start time", form.get("requested_time")),
+        (
+            "Hours",
+            str(form["hours_needed"]) if form.get("hours_needed") else None,
+        ),
+        (
+            "Pets",
+            "Yes"
+            if form.get("has_pets") is True
+            else ("No" if form.get("has_pets") is False else None),
+        ),
+        ("Contact", form.get("contact")),
+    ]
+
+    filled = sum(1 for _, value in fields if value)
+    pct = int(filled / len(fields) * 100)
+    rows = ""
+
+    for label, value in fields:
+        icon = (
+            '<span class="check-done">O</span>'
+            if value
+            else '<span class="check-empty">o</span>'
+        )
+
+        display = (
+            f"<b style='color:#E8F0ED'>{_html.escape(str(value))}</b>"
+            if value
+            else "<span style='color:#6B7280'>-</span>"
+        )
+
+        rows += (
+            f'<div class="progress-row">{icon} '
+            f'<span style="flex:1">{_html.escape(label)}</span>{display}</div>'
+        )
+
+    st.markdown(
+        f"""
+<div class="progress-card">
+  <div style="font-size:11px;letter-spacing:.07em;color:#9BBFB3;margin-bottom:6px">
+    BOOKING FORM . {filled}/{len(fields)} fields
+  </div>
+  <div style="background:rgba(255,255,255,.1);border-radius:999px;height:4px;margin-bottom:10px">
+    <div style="background:#4ADE80;width:{pct}%;height:4px;border-radius:999px"></div>
+  </div>
+  {rows}
+</div>
+""",
+        unsafe_allow_html=True,
+    )
 
 
 with st.sidebar:
@@ -334,44 +315,45 @@ with st.sidebar:
 
     st.markdown("---")
 
-    bd: BookingDetails | None = st.session_state.booking_details
+    form = st.session_state.form
 
-    if bd and any(
-        [
-            bd.customer_name,
-            bd.requested_date,
-            bd.address,
-            bd.hours_needed,
+    if any(
+        form.get(key)
+        for key in [
+            "customer_name",
+            "address",
+            "requested_date",
         ]
     ):
         st.markdown(
             "<div style='font-size:13px;font-weight:600;letter-spacing:.05em'>📋 BOOKING IN PROGRESS</div>",
             unsafe_allow_html=True,
         )
-        _render_booking_progress(bd)
+        _render_form_progress(form)
         st.markdown("---")
 
-    clf = st.session_state.last_classification
+    debug = st.session_state.last_debug
 
-    if clf:
+    if debug:
         with st.expander("🔍 Last classification", expanded=False):
+            rows = [
+                ("Intent", debug.get("intent")),
+                ("Sentiment", debug.get("sentiment")),
+                ("Urgency", debug.get("urgency")),
+                ("Confidence", f"{debug.get('confidence', 0):.0%}"),
+                ("Emergency", "[!] YES" if debug.get("is_emergency") else "No"),
+            ]
 
-            def _row(label: str, value: str) -> None:
+            for label, value in rows:
                 st.markdown(
-                    f'<div class="debug-row"><span>{_html.escape(label)}</span>'
-                    f'<span class="debug-val">{_html.escape(value)}</span></div>',
+                    f'<div class="debug-row"><span>{_html.escape(str(label))}</span>'
+                    f'<span class="debug-val">{_html.escape(str(value))}</span></div>',
                     unsafe_allow_html=True,
                 )
 
-            _row("Intent", clf.intent.value)
-            _row("Sentiment", clf.sentiment.value)
-            _row("Urgency", clf.urgency.value)
-            _row("Confidence", f"{clf.confidence:.0%}")
-            _row("Emergency", "[!] YES" if clf.is_emergency else "No")
-
-            if clf.reasoning:
+            if debug.get("reasoning"):
                 st.markdown(
-                    f"<div style='font-size:11px;color:#9CA3AF;margin-top:6px'>{_html.escape(clf.reasoning)}</div>",
+                    f"<div style='font-size:11px;color:#9CA3AF;margin-top:6px'>{_html.escape(str(debug['reasoning']))}</div>",
                     unsafe_allow_html=True,
                 )
 
@@ -381,9 +363,9 @@ with st.sidebar:
         for key in [
             "messages",
             "history",
-            "booking_details",
-            "turn_number",
-            "last_classification",
+            "form",
+            "last_debug",
+            "turn",
             "session_id",
         ]:
             if key in st.session_state:
@@ -407,83 +389,59 @@ st.markdown(
 )
 
 
-for msg in st.session_state.messages:
-    _render_message(msg)
+for message in st.session_state.messages:
+    _render_message(message)
 
 
 if prompt := st.chat_input("Type your message..."):
-    user_msg_dict = {"role": "user", "content": prompt}
-    st.session_state.messages.append(user_msg_dict)
+    st.session_state.messages.append(
+        {
+            "role": "user",
+            "content": prompt,
+        }
+    )
 
     with st.chat_message("user", avatar="👤"):
         st.markdown(prompt)
 
     with st.chat_message("assistant", avatar="🧹"):
         with st.spinner(""):
-            try:
-                chat_turn, updated_booking = process_message(
-                    user_message=prompt,
-                    history=st.session_state.history,
-                    session_id=st.session_state.session_id,
-                    booking_details=st.session_state.booking_details,
-                    turn_number=st.session_state.turn_number,
-                )
-            except Exception as exc:
-                st.error(f"Something went wrong: {exc}")
-                st.stop()
+            response: Response = process_message(
+                message=prompt,
+                history=st.session_state.history,
+                form=st.session_state.form,
+            )
 
-        response = chat_turn.agent_response
-        route_to = chat_turn.orchestrator.route_to
-        clf = chat_turn.orchestrator.classification
+        _render_assistant(
+            _badge(response.agent),
+            response.message,
+            response.agent,
+        )
 
-        if isinstance(response, BookingAgentResponse):
-            reply_text = response.message
-        elif isinstance(response, FAQAgentResponse):
-            reply_text = response.message
-        elif isinstance(response, EscalationRequest):
-            reply_text = response.message_to_user
-        elif isinstance(response, FollowUpAgentResponse):
-            reply_text = response.message
-        else:
-            reply_text = str(response)
-
-        is_emergency = clf.is_emergency
-        badge = _agent_badge(route_to)
-
-        if route_to == AgentType.ESCALATION:
-            box_class = "emergency-box" if is_emergency else "escalation-box"
-            _render_assistant_msg(badge, reply_text, box_class)
-        else:
-            _render_assistant_msg(badge, reply_text)
-
-    st.session_state.last_classification = clf
-
-    if isinstance(response, BookingAgentResponse):
-        st.session_state.booking_details = response.collected
-
-    if updated_booking:
-        st.session_state.booking_details = updated_booking
+    st.session_state.form = response.form
+    st.session_state.last_debug = response.debug
+    st.session_state.turn += 1
 
     st.session_state.history.append(
-        ConversationMessage(role="user", content=prompt)
+        {
+            "role": "user",
+            "content": prompt,
+        }
     )
 
     st.session_state.history.append(
-        ConversationMessage(
-            role="assistant",
-            content=reply_text,
-            agent_type=route_to,
-        )
+        {
+            "role": "assistant",
+            "content": response.message,
+        }
     )
 
     st.session_state.messages.append(
         {
             "role": "assistant",
-            "content": reply_text,
-            "agent_type": route_to,
-            "metadata": {"is_emergency": is_emergency},
+            "content": response.message,
+            "agent": response.agent,
         }
     )
 
-    st.session_state.turn_number += 1
     st.rerun()
