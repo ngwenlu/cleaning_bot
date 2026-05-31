@@ -138,7 +138,6 @@ class IntentClassification(BaseModel):
     @field_validator("detected_time", mode="before")
     @classmethod
     def coerce_detected_time(cls, value):
-        """Return None for any time that fails parsing rather than crashing."""
         if value is None:
             return None
 
@@ -152,7 +151,6 @@ class IntentClassification(BaseModel):
     @field_validator("detected_date", mode="before")
     @classmethod
     def coerce_detected_date(cls, value):
-        """Return None for any date that fails parsing rather than crashing."""
         if value is None:
             return None
 
@@ -165,7 +163,6 @@ class IntentClassification(BaseModel):
 
     @model_validator(mode="after")
     def sync_emergency_flag(self) -> "IntentClassification":
-        """Derive emergency, date mismatch, and service-hour flags."""
         if self.detected_date is not None:
             delta = (self.detected_date - date.today()).days
             emergency_window = _CONFIG.booking.emergency_window_days
@@ -205,38 +202,30 @@ class IntentClassification(BaseModel):
 
 class BookingDetails(BaseModel):
     """
-    Lead / booking details collected by the Booking Agent.
-    All fields are optional because the agent fills them progressively.
-    Nothing is confirmed here.
+    Lead collected by the Booking Agent.
+    Required: name, address, date, start time, hours needed, has_pets.
+    All fields are optional because they are filled progressively across turns.
     """
 
-    customer: CustomerInfo = Field(default_factory=CustomerInfo)
+    customer_name: Optional[str] = None
+    address: Optional[str] = None
     requested_date: Optional[date] = None
     requested_time: Optional[time] = None
-    address: Optional[str] = None
-    postal_code: Optional[str] = None
-    apartment_type: Optional[ApartmentType] = None
-    hours_needed: Optional[float] = Field(
+    hours_needed: Optional[float] = Field(None, gt=0)
+    has_pets: Optional[bool] = None
+
+    contact: Optional[str] = Field(
         None,
-        gt=0,
-        description="Estimated cleaning hours",
+        description="Phone number or email, if the customer volunteers it",
     )
-    num_rooms: Optional[int] = Field(None, gt=0)
-    special_instructions: Optional[str] = None
-    supplies_confirmed: bool = Field(
-        False,
-        description="Customer has acknowledged they will provide all cleaning supplies",
+    notes: Optional[str] = Field(
+        None,
+        description="Any extra context the customer mentions",
     )
 
     is_emergency: bool = False
-    date_in_past: bool = Field(
-        False,
-        description="True when requested_date is before today, invalid for booking.",
-    )
-    time_outside_hours: bool = Field(
-        False,
-        description="True when requested_time is outside the service window.",
-    )
+    date_in_past: bool = False
+    time_outside_hours: bool = False
 
     @model_validator(mode="after")
     def flag_date_issues(self) -> "BookingDetails":
@@ -253,32 +242,37 @@ class BookingDetails(BaseModel):
 
         if self.requested_time is not None:
             requested_hour = self.requested_time.hour
-            start_hour = _CONFIG.hours.start_hour
-            end_hour = _CONFIG.hours.end_hour
 
-            if requested_hour < start_hour or requested_hour >= end_hour:
+            if (
+                requested_hour < _CONFIG.hours.start_hour
+                or requested_hour >= _CONFIG.hours.end_hour
+            ):
                 self.time_outside_hours = True
                 self.requested_time = None
 
         return self
 
     def missing_fields(self) -> list[str]:
-        """Return names of required fields that are still missing."""
-        required = [
-            "requested_date",
-            "requested_time",
-            "address",
-            "apartment_type",
-            "hours_needed",
-        ]
+        """Return required fields not yet collected."""
+        missing: list[str] = []
 
-        missing = [field for field in required if getattr(self, field) is None]
+        if not self.customer_name:
+            missing.append("customer_name")
 
-        if not self.customer.name:
-            missing.insert(0, "customer.name")
+        if not self.address:
+            missing.append("address")
 
-        if not (self.customer.phone or self.customer.email):
-            missing.append("customer.phone_or_email")
+        if self.requested_date is None:
+            missing.append("requested_date")
+
+        if self.requested_time is None:
+            missing.append("requested_time")
+
+        if self.hours_needed is None:
+            missing.append("hours_needed")
+
+        if self.has_pets is None:
+            missing.append("has_pets")
 
         return missing
 
@@ -369,7 +363,6 @@ class OrchestratorDecision(BaseModel):
 
     @model_validator(mode="after")
     def enforce_emergency_routing(self) -> "OrchestratorDecision":
-        """Emergency bookings must always route to escalation."""
         if self.classification.is_emergency:
             self.route_to = AgentType.ESCALATION
 
