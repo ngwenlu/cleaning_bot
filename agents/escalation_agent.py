@@ -19,6 +19,7 @@ from datetime import date
 
 from agents.base import BaseAgent
 from config import SALESPERSON_EMAIL, SALESPERSON_WHATSAPP
+from knowledge_base import CONFIG as _CONFIG
 from models import (
     BookingDetails,
     ConversationMessage,
@@ -84,6 +85,14 @@ For emergency bookings, the message_to_user should convey urgency and reassuranc
 Example:
 "I see you need a cleaner very soon. I'm flagging this to our team right now. Someone will WhatsApp you shortly."
 
+SERVICE HOURS RULE:
+Always check the BUSINESS RULES below before escalating.
+If the requested time is outside the stated service hours:
+- Do NOT escalate.
+- Politely explain the service hours.
+- Ask the customer to choose a time within the service window.
+- Set urgency=routine.
+
 DATE MISMATCH RULE:
 
 If you are told that date_seems_wrong=True, the customer gave a date that is logically inconsistent with their request.
@@ -103,6 +112,8 @@ Case B: Complaint or feedback with a FUTURE date
 In both cases:
 - Do NOT record the wrong date as confirmed in conversation_summary.
 - Flag it as unconfirmed.
+
+{_CONFIG.rules_for_agents()}
 
 Respond ONLY with a valid JSON object.
 No preamble.
@@ -154,8 +165,9 @@ Schema:
             )
 
             if classification.date_seems_wrong:
-                mismatch_note = self._build_date_mismatch_note(classification)
-                extra_parts.append(mismatch_note)
+                extra_parts.append(
+                    self._build_date_mismatch_note(classification)
+                )
 
         if booking_details:
             filled = {
