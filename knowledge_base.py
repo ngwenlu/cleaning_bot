@@ -27,14 +27,14 @@ key=“supplies”,
 topics=[“supplies”, “equipment”, “what to prepare”, “bring”],
 answer=(
 “Please prepare the following before the cleaner arrives:\n”
-“• Mop and bucket\n”
-“• Vacuum cleaner\n”
-“• Broom and dustpan\n”
-“• Floor cleaner / detergent\n”
-“• Toilet cleaner and scrubber\n”
-“• Glass cleaner (optional)\n”
-“• Microfibre cloths or old rags\n”
-“• Rubber gloves for the cleaner\n\n”
+“* Mop and bucket\n”
+“* Vacuum cleaner\n”
+“* Broom and dustpan\n”
+“* Floor cleaner / detergent\n”
+“* Toilet cleaner and scrubber\n”
+“* Glass cleaner (optional)\n”
+“* Microfibre cloths or old rags\n”
+“* Rubber gloves for the cleaner\n\n”
 “If any supplies are missing, the cleaner may not be able to complete certain tasks.”
 ),
 ),
@@ -44,9 +44,9 @@ topics=[“price”, “cost”, “rate”, “how much”, “fee”, “charg
 answer=(
 “Our rates are based on the size of the space and number of hours needed. “
 “Indicative rates:\n”
-“• 2–3 hours (studio / 1-2 room HDB): from $25/hr\n”
-“• 3–4 hours (3-room HDB / small condo): from $22/hr\n”
-“• 4–6 hours (4–5 room HDB / larger condo): from $20/hr\n\n”
+“* 2-3 hours (studio / 1-2 room HDB): from $25/hr\n”
+“* 3-4 hours (3-room HDB / small condo): from $22/hr\n”
+“* 4-6 hours (4-5 room HDB / larger condo): from $20/hr\n\n”
 “Final pricing is confirmed by our salesperson after reviewing your details.”
 ),
 ),
@@ -58,7 +58,7 @@ answer=(
 “1. You share your details with our chatbot (date, address, home size, hours needed).\n”
 “2. Our salesperson reviews your request and contacts you to confirm the slot.\n”
 “3. Once confirmed, we send the cleaner to your place at the agreed time.\n\n”
-“Note: Bookings are NOT confirmed through this chat — a human salesperson will reach out to you.”
+“Note: Bookings are NOT confirmed through this chat – a human salesperson will reach out to you.”
 ),
 ),
 KBEntry(
