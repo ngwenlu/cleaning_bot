@@ -32,10 +32,10 @@ from agents.orchestrator import process_message
 # – Page config ————————————————————
 
 st.set_page_config(
-page_title=“CleanBot | Dad’s Cleaning”,
-page_icon=“🧹”,
-layout=“wide”,
-initial_sidebar_state=“expanded”,
+page_title="CleanBot | Dad’s Cleaning",
+page_icon="🧹",
+layout="wide",
+initial_sidebar_state="expanded",
 )
 
 # – Custom CSS ———————————————————––
