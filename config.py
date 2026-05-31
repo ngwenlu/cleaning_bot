@@ -31,11 +31,8 @@ def _get(key: str, default: str = "") -> str:
 
 
 # ------------------------------------------------------------------
-# OpenAI Models
+# Models
 # ------------------------------------------------------------------
-
-# gpt-4o-mini is fast and inexpensive while still handling
-# structured JSON extraction very well.
 
 MODEL = "gpt-4o-mini"
 CLASSIFIER_MODEL = "gpt-4o-mini"
@@ -54,10 +51,10 @@ client = OpenAI(
 
 
 # ------------------------------------------------------------------
-# Business Configuration
+# Salesperson Contact Details
 # ------------------------------------------------------------------
 
-COMPANY_NAME = "Dad's Cleaning Services"
+# Business rules (hours, pricing, etc.) live in knowledge_base.py
 
 SALESPERSON_WHATSAPP = _get(
     "SALESPERSON_PHONE",
@@ -68,11 +65,3 @@ SALESPERSON_EMAIL = _get(
     "SALESPERSON_EMAIL",
     "sales@example.com",
 )
-
-
-# ------------------------------------------------------------------
-# Service Hours (Singapore Time, UTC+8)
-# ------------------------------------------------------------------
-
-SERVICE_HOURS_START = 8   # 8:00 AM
-SERVICE_HOURS_END = 20    # 8:00 PM
