@@ -453,6 +453,10 @@ if prompt := st.chat_input("Type your message..."):
         response.debug["complete"] = response.complete
         response.debug["message_preview"] = response.message[:300]
         response.debug["form"] = response.form
+        
+        response.debug["response_agent"] = response.agent
+        response.debug["response_escalate"] = response.escalate
+        response.debug["response_complete"] = response.complete
 
         print("=" * 80, flush=True)
         print("UI DEBUG RESPONSE", flush=True)
