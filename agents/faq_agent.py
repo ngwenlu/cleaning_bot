@@ -1,10 +1,10 @@
-“””
+"""
 FAQ Agent
 
 Answers customer questions using the static knowledge base.
 If the question is outside scope, sets answered=False so the
 orchestrator can decide whether to escalate.
-“””
+"""
 
 from **future** import annotations
 
@@ -16,9 +16,9 @@ from models import ConversationMessage, FAQAgentResponse
 
 _SCHEMA = json.dumps(
 {
-“message”: “Answer to the customer’s question, in plain conversational English”,
-“sources”: “list of knowledge base keys used, e.g. [‘pricing’, ‘supplies’]”,
-“answered”: “boolean – false if the question is outside the knowledge base”,
+"message": "Answer to the customer’s question, in plain conversational English",
+"sources": "list of knowledge base keys used, e.g. [‘pricing’, ‘supplies’]",
+"answered": "boolean – false if the question is outside the knowledge base",
 },
 indent=2,
 )
@@ -48,7 +48,7 @@ For multi-point answers, use short bullet lists.
 
 Respond ONLY with a valid JSON object. No preamble, no markdown.
 {_SCHEMA}
-“””
+"""
 
 ```
 def parse_response(self, raw: dict) -> FAQAgentResponse:
