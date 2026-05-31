@@ -834,3 +834,114 @@ def process_message(
             agent="system",
             form=form,
         )
+def process_message(
+    message: str,
+    history: list[dict],
+    form: dict,
+) -> Response:
+    try:
+        clf = classify(message, history)
+        intent = clf["intent"]
+
+        booking_started = any(
+            form.get(k)
+            for k in [
+                "customer_name",
+                "address",
+                "requested_date",
+                "requested_time",
+                "hours_needed",
+                "has_pets",
+            ]
+        )
+
+        booking_keywords = [
+            "book",
+            "booking",
+            "cleaning",
+            "cleaner",
+            "hour",
+            "hours",
+            "am",
+            "pm",
+            "today",
+            "tomorrow",
+            "next",
+            "saturday",
+            "sunday",
+            "monday",
+            "tuesday",
+            "wednesday",
+            "thursday",
+            "friday",
+        ]
+
+        if booking_started or any(word in message.lower() for word in booking_keywords):
+            intent = "booking"
+
+        invalid_resp = _invalid_datetime_response(clf, form)
+
+        if invalid_resp is not None:
+            invalid_resp.intent = intent
+            invalid_resp.agent = "booking"
+            invalid_resp.escalate = False
+            invalid_resp.debug.update(clf)
+            return invalid_resp
+
+        if intent == "booking":
+            resp = run_booking(message, history, form, clf=clf)
+
+        elif intent == "feedback":
+            resp = run_escalation(message, history, clf)
+
+        elif intent == "escalation":
+            resp = run_escalation(message, history, clf)
+
+        elif intent in ("faq", "out_of_scope"):
+            resp = run_faq(message, history)
+
+            if resp.escalate:
+                resp = run_escalation(message, history, clf)
+
+        else:
+            resp = run_faq(message, history)
+
+        if intent == "booking":
+            resp.agent = "booking"
+            resp.escalate = False
+
+        resp.intent = intent
+
+        resp.debug.update(
+            {
+                "intent": intent,
+                "agent": resp.agent,
+                "sentiment": clf.get("sentiment"),
+                "urgency": clf.get("urgency"),
+                "confidence": clf.get("confidence"),
+                "reasoning": clf.get("reasoning"),
+                "date_text": clf.get("date_text"),
+                "time_text": clf.get("time_text"),
+                "detected_date": clf.get("detected_date"),
+                "detected_time": clf.get("detected_time"),
+                "max_booking_date": clf.get("max_booking_date"),
+                "is_emergency": clf.get("is_emergency"),
+                "date_in_past": clf.get("date_in_past"),
+                "date_too_far": clf.get("date_too_far"),
+                "time_outside_hours": clf.get("time_outside_hours"),
+                "time_too_late": clf.get("time_too_late"),
+                "form": resp.form,
+            }
+        )
+
+        return _sanitize_no_confirmation(resp)
+
+    except Exception as exc:
+        log.error("process_message crashed: %s", exc, exc_info=True)
+
+        return Response(
+            message="I'm sorry, I ran into a technical issue. Could you try again?",
+            agent="system",
+            form=form,
+        )
+
