@@ -20,9 +20,9 @@ _SCHEMA = json.dumps(
 “intent”: “one of: booking_enquiry | emergency_booking | faq | complaint | feedback | escalation | out_of_scope”,
 “sentiment”: “one of: positive | neutral | negative | urgent”,
 “urgency”: “one of: routine | high | critical”,
-“confidence”: “float 0.0–1.0”,
+“confidence”: “float 0.0-1.0”,
 “reasoning”: “one sentence explaining the classification”,
-“is_emergency”: “boolean — true if booking date is today or tomorrow”,
+“is_emergency”: “boolean – true if booking date is today or tomorrow”,
 “detected_date”: “ISO date string YYYY-MM-DD if user mentioned a date, else null”,
 },
 indent=2,
@@ -31,13 +31,13 @@ indent=2,
 _INTENT_DESCRIPTIONS = “””
 Intent definitions:
 
-- booking_enquiry   → user wants to schedule a cleaning session (not urgent)
-- emergency_booking → user wants a session TODAY or TOMORROW (override any other intent)
-- faq               → user has a question about the service, pricing, supplies, etc.
-- complaint         → user is unhappy about a past session or service quality
-- feedback          → user is giving post-service feedback (positive or constructive)
-- escalation        → user explicitly asks to speak to a human, or situation is unclear/dangerous
-- out_of_scope      → unrelated to the cleaning business
+- booking_enquiry   -> user wants to schedule a cleaning session (not urgent)
+- emergency_booking -> user wants a session TODAY or TOMORROW (override any other intent)
+- faq               -> user has a question about the service, pricing, supplies, etc.
+- complaint         -> user is unhappy about a past session or service quality
+- feedback          -> user is giving post-service feedback (positive or constructive)
+- escalation        -> user explicitly asks to speak to a human, or situation is unclear/dangerous
+- out_of_scope      -> unrelated to the cleaning business
   “””
 
 class IntentClassifier(BaseAgent):
@@ -55,16 +55,16 @@ Today’s date is {today}.
 
 Sentiment:
 
-- positive → satisfied, grateful, happy
-- neutral  → factual, no strong emotion
-- negative → frustrated, upset, angry
-- urgent   → explicit time pressure, distress, emergencies
+- positive -> satisfied, grateful, happy
+- neutral  -> factual, no strong emotion
+- negative -> frustrated, upset, angry
+- urgent   -> explicit time pressure, distress, emergencies
 
 Urgency:
 
-- routine  → normal enquiry or FAQ
-- high     → complaint or strong negative sentiment
-- critical → emergency booking (today/tomorrow), safety concern, explicit distress
+- routine  -> normal enquiry or FAQ
+- high     -> complaint or strong negative sentiment
+- critical -> emergency booking (today/tomorrow), safety concern, explicit distress
 
 IMPORTANT: If the user mentions wanting a booking today, tonight, tomorrow, or any phrase
 that resolves to today’s date ({today}) or tomorrow, set is_emergency=true and
