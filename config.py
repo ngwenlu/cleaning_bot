@@ -1,11 +1,11 @@
 """
 Central config. All agents import from here.
-Set ANTHROPIC_API_KEY in your .env or Streamlit secrets.
+Set OPENAI_API_KEY in your .env or Streamlit secrets.
 """
 
 import os
 
-from anthropic import Anthropic
+from openai import OpenAI
 
 # Support Streamlit secrets when running on Streamlit Cloud
 
@@ -26,14 +26,14 @@ def _get(key: str, default: str = "") -> str:
 
 # Model
 
-MODEL = "claude-sonnet-4-20250514"
+MODEL = "gpt-5"
 MAX_TOKENS = 1024
 
 
 # Client (singleton)
 
-client = Anthropic(
-    api_key=_get("ANTHROPIC_API_KEY")
+client = OpenAI(
+    api_key=_get("OPENAI_API_KEY")
 )
 
 
@@ -54,5 +54,5 @@ SALESPERSON_EMAIL = _get(
 
 # Service hours in Singapore time (SGT = UTC+8)
 
-SERVICE_HOURS_START = 8   # 8am
-SERVICE_HOURS_END = 20    # 8pm
+SERVICE_HOURS_START = 8
+SERVICE_HOURS_END = 20
