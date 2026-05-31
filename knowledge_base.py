@@ -118,6 +118,7 @@ Late fee: {c.late_fee_pct}% of session cost if cancelled with less than {c.notic
 
 BOOKING RULES:
 Emergency booking: any session for today or within the next {b.emergency_window_days} day(s)
+Invalid dates: any session for more than 6 months after today. 
 Supplies: customer provides ALL cleaning supplies. Cleaners bring NOTHING.
 Required supplies the customer must prepare:
 {supplies_list}
