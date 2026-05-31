@@ -12,6 +12,7 @@ import json
 from datetime import date
 
 from agents.base import BaseAgent
+from config import CLASSIFIER_MAX_TOKENS, CLASSIFIER_MODEL
 from models import ConversationMessage, IntentClassification
 
 
@@ -27,6 +28,7 @@ _SCHEMA = json.dumps(
         "reasoning": "one sentence explaining the classification",
         "is_emergency": "boolean, true if booking date is today or tomorrow",
         "detected_date": "ISO date string YYYY-MM-DD if user mentioned a date, else null",
+        "date_seems_wrong": "boolean, true if the date is logically inconsistent with the intent",
     },
     indent=2,
 )
@@ -70,14 +72,18 @@ Urgency:
 - high     -> complaint or strong negative sentiment
 - critical -> emergency booking, safety concern, or explicit distress
 
-IMPORTANT:
+Emergency rule:
 If the user mentions wanting a booking today, tonight, tomorrow, tomorrow morning,
 tmr, tmrw, ASAP, or any phrase that resolves to today's date ({today}) or tomorrow,
 set:
-
 - is_emergency=true
 - intent=emergency_booking
 - urgency=critical
+
+Date mismatch rule:
+- If the user wants to book cleaning but gives a past date, set date_seems_wrong=true.
+- If the user gives complaint or feedback about a future date, set date_seems_wrong=true.
+- If the date is valid and logically consistent, set date_seems_wrong=false.
 
 Respond ONLY with a valid JSON object matching this schema.
 No preamble.
@@ -99,6 +105,8 @@ Schema:
         raw = self._call_llm(
             user_message=user_message,
             history=history,
+            model_override=CLASSIFIER_MODEL,
+            max_tokens_override=CLASSIFIER_MAX_TOKENS,
         )
 
         return self.parse_response(raw)
