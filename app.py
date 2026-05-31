@@ -1,5 +1,5 @@
 “””
-app.py — Streamlit UI for the Cleaning Company Multiagent Chatbot
+app.py – Streamlit UI for the Cleaning Company Multiagent Chatbot
 Run:  streamlit run app.py
 “””
 
@@ -13,7 +13,7 @@ from datetime import datetime
 import streamlit as st
 from dotenv import load_dotenv
 
-# ── Path setup (works whether run from root or subdirectory) ───────────────
+# – Path setup (works whether run from root or subdirectory) —————
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(**file**)))
 load_dotenv()
@@ -29,7 +29,7 @@ FollowUpAgentResponse,
 )
 from agents.orchestrator import process_message
 
-# ── Page config ────────────────────────────────────────────────────────────
+# – Page config ————————————————————
 
 st.set_page_config(
 page_title=“CleanBot | Dad’s Cleaning”,
@@ -38,7 +38,7 @@ layout=“wide”,
 initial_sidebar_state=“expanded”,
 )
 
-# ── Custom CSS ─────────────────────────────────────────────────────────────
+# – Custom CSS ———————————————————––
 
 st.markdown(
 “””
@@ -50,12 +50,12 @@ html, body, [class*="css"] {
     font-family: 'DM Sans', sans-serif;
 }
 
-/* ── Page background ── */
+/* -- Page background -- */
 .stApp {
     background-color: #FAF8F4;
 }
 
-/* ── Sidebar ── */
+/* -- Sidebar -- */
 section[data-testid="stSidebar"] {
     background-color: #1A2E2A;
     border-right: none;
@@ -73,13 +73,13 @@ section[data-testid="stSidebar"] .stMarkdown hr {
     border-color: rgba(255,255,255,0.12);
 }
 
-/* ── Chat messages ── */
+/* -- Chat messages -- */
 .stChatMessage {
     border-radius: 14px;
     padding: 4px 8px;
 }
 
-/* ── Agent badge ── */
+/* -- Agent badge -- */
 .agent-badge {
     display: inline-block;
     font-size: 10px;
@@ -96,7 +96,7 @@ section[data-testid="stSidebar"] .stMarkdown hr {
 .badge-followup { background: #FEF3C7; color: #92400E; }
 .badge-system   { background: #F3F4F6; color: #374151; }
 
-/* ── Escalation alert box ── */
+/* -- Escalation alert box -- */
 .escalation-box {
     background: #FFF5F5;
     border-left: 4px solid #EF4444;
@@ -112,7 +112,7 @@ section[data-testid="stSidebar"] .stMarkdown hr {
     margin-top: 4px;
 }
 
-/* ── Booking progress card ── */
+/* -- Booking progress card -- */
 .progress-card {
     background: rgba(255,255,255,0.07);
     border-radius: 10px;
@@ -129,7 +129,7 @@ section[data-testid="stSidebar"] .stMarkdown hr {
 .check-done   { color: #4ADE80; font-size: 14px; }
 .check-empty  { color: #6B7280; font-size: 14px; }
 
-/* ── Company header in sidebar ── */
+/* -- Company header in sidebar -- */
 .company-header {
     text-align: center;
     padding: 8px 0 16px 0;
@@ -152,7 +152,7 @@ section[data-testid="stSidebar"] .stMarkdown hr {
     letter-spacing: 0.05em;
 }
 
-/* ── Debug expander ── */
+/* -- Debug expander -- */
 .debug-row {
     font-size: 11px;
     color: #9CA3AF;
@@ -162,12 +162,12 @@ section[data-testid="stSidebar"] .stMarkdown hr {
 }
 .debug-val { color: #D1FAE5; font-weight: 500; }
 
-/* ── Chat input styling ── */
+/* -- Chat input styling -- */
 .stChatInputContainer {
     border-top: 1px solid #E5E0D8;
 }
 
-/* ── Hide Streamlit branding ── */
+/* -- Hide Streamlit branding -- */
 #MainMenu, footer, header { visibility: hidden; }
 </style>
 """,
@@ -176,7 +176,7 @@ unsafe_allow_html=True,
 
 )
 
-# ── Session state initialisation ───────────────────────────────────────────
+# – Session state initialisation —————————————––
 
 def _init_state():
 if “session_id” not in st.session_state:
@@ -185,7 +185,7 @@ if “messages” not in st.session_state:
 # Each entry: {role, content, agent_type, metadata}
 st.session_state.messages = []
 if “history” not in st.session_state:
-# List[ConversationMessage] — passed to LLM
+# List[ConversationMessage] – passed to LLM
 st.session_state.history = []
 if “booking_details” not in st.session_state:
 st.session_state.booking_details = None
@@ -196,7 +196,7 @@ st.session_state.last_classification = None
 
 _init_state()
 
-# ── Helpers ────────────────────────────────────────────────────────────────
+# – Helpers ––––––––––––––––––––––––––––––––
 
 def _agent_badge(agent_type: AgentType | str) -> str:
 labels = {
@@ -219,13 +219,13 @@ fields = [
 (“Address”,       bd.address),
 (“Apt type”,      bd.apartment_type.value if bd.apartment_type else None),
 (“Hours needed”,  str(bd.hours_needed) if bd.hours_needed else None),
-(“Supplies ✓”,    “Yes” if bd.supplies_confirmed else None),
+(“Supplies (done)”,    “Yes” if bd.supplies_confirmed else None),
 ]
 rows = “”
 filled = sum(1 for _, v in fields if v)
 for label, val in fields:
-icon = ‘<span class="check-done">●</span>’ if val else ‘<span class="check-empty">○</span>’
-display = f”<b style='color:#E8F0ED'>{val}</b>” if val else “<span style='color:#6B7280'>—</span>”
+icon = ‘<span class="check-done">O</span>’ if val else ‘<span class="check-empty">o</span>’
+display = f”<b style='color:#E8F0ED'>{val}</b>” if val else “<span style='color:#6B7280'>–</span>”
 rows += f’<div class="progress-row">{icon} <span style="flex:1">{label}</span>{display}</div>’
 
 ```
@@ -234,7 +234,7 @@ st.markdown(
     f"""
     <div class="progress-card">
         <div style="font-size:11px;letter-spacing:.07em;color:#9BBFB3;margin-bottom:6px">
-            BOOKING FORM &nbsp;·&nbsp; {filled}/{len(fields)} fields
+            BOOKING FORM &nbsp;.&nbsp; {filled}/{len(fields)} fields
         </div>
         <div style="background:rgba(255,255,255,.1);border-radius:999px;height:4px;margin-bottom:10px">
             <div style="background:#4ADE80;width:{pct}%;height:4px;border-radius:999px;transition:width .4s"></div>
@@ -269,7 +269,7 @@ with st.chat_message(role, avatar="🧹" if role == "assistant" else "👤"):
         st.markdown(content)
 ```
 
-# ── Sidebar ────────────────────────────────────────────────────────────────
+# – Sidebar ––––––––––––––––––––––––––––––––
 
 with st.sidebar:
 st.markdown(
@@ -277,7 +277,7 @@ st.markdown(
 <div class="company-header">
 <span class="company-icon">🧹</span>
 <span class="company-name">Dad’s Cleaning</span>
-<span class="company-tagline">PART-TIME HOME CLEANING · SINGAPORE</span>
+<span class="company-tagline">PART-TIME HOME CLEANING . SINGAPORE</span>
 </div>
 “””,
 unsafe_allow_html=True,
@@ -311,7 +311,7 @@ if clf:
         _row("Sentiment",  clf.sentiment.value)
         _row("Urgency",    clf.urgency.value)
         _row("Confidence", f"{clf.confidence:.0%}")
-        _row("Emergency",  "⚠️ YES" if clf.is_emergency else "No")
+        _row("Emergency",  "[!]️ YES" if clf.is_emergency else "No")
         if clf.reasoning:
             st.markdown(
                 f"<div style='font-size:11px;color:#9CA3AF;margin-top:6px'>{clf.reasoning}</div>",
@@ -330,12 +330,12 @@ if st.button("🔄  Start new conversation", use_container_width=True):
 
 st.markdown(
     "<div style='font-size:11px;color:#4A7A6E;text-align:center;margin-top:12px'>"
-    "Powered by Claude · Anthropic</div>",
+    "Powered by Claude . Anthropic</div>",
     unsafe_allow_html=True,
 )
 ```
 
-# ── Main chat area ─────────────────────────────────────────────────────────
+# – Main chat area ———————————————————
 
 st.markdown(
 “<h1 style='font-family:\"DM Serif Display\",serif;font-size:28px;"
@@ -350,7 +350,7 @@ unsafe_allow_html=True,
 for msg in st.session_state.messages:
 _render_message(msg)
 
-# ── Handle new input ───────────────────────────────────────────────────────
+# – Handle new input —————————————————––
 
 if prompt := st.chat_input(“Type your message…”):
 
