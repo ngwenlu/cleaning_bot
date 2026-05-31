@@ -1,11 +1,11 @@
-“””
+"""
 Intent Classifier Agent
 
 LLM-based classifier that returns IntentClassification.
 Detects intent, sentiment, urgency, and whether the booking is an emergency
 (same-day or next-day), even when the date is expressed naturally
 (“tonight”, “tmr”, “tomorrow morning”, etc.).
-“””
+"""
 
 from **future** import annotations
 
@@ -17,18 +17,18 @@ from models import ConversationMessage, Intent, IntentClassification, Sentiment,
 
 _SCHEMA = json.dumps(
 {
-“intent”: “one of: booking_enquiry | emergency_booking | faq | complaint | feedback | escalation | out_of_scope”,
-“sentiment”: “one of: positive | neutral | negative | urgent”,
-“urgency”: “one of: routine | high | critical”,
-“confidence”: “float 0.0-1.0”,
-“reasoning”: “one sentence explaining the classification”,
-“is_emergency”: “boolean – true if booking date is today or tomorrow”,
-“detected_date”: “ISO date string YYYY-MM-DD if user mentioned a date, else null”,
+"intent": "one of: booking_enquiry | emergency_booking | faq | complaint | feedback | escalation | out_of_scope",
+"sentiment": "one of: positive | neutral | negative | urgent",
+"urgency": "one of: routine | high | critical",
+"confidence": "float 0.0-1.0",
+"reasoning": "one sentence explaining the classification",
+"is_emergency": "boolean – true if booking date is today or tomorrow",
+"detected_date": "ISO date string YYYY-MM-DD if user mentioned a date, else null",
 },
 indent=2,
 )
 
-_INTENT_DESCRIPTIONS = “””
+_INTENT_DESCRIPTIONS = """
 Intent definitions:
 
 - booking_enquiry   -> user wants to schedule a cleaning session (not urgent)
@@ -38,7 +38,7 @@ Intent definitions:
 - feedback          -> user is giving post-service feedback (positive or constructive)
 - escalation        -> user explicitly asks to speak to a human, or situation is unclear/dangerous
 - out_of_scope      -> unrelated to the cleaning business
-  “””
+"""
 
 class IntentClassifier(BaseAgent):
 
@@ -72,7 +72,7 @@ intent=emergency_booking regardless of other signals.
 
 Respond ONLY with a valid JSON object matching this schema. No preamble, no markdown.
 {_SCHEMA}
-“””
+"""
 
 ```
 def parse_response(self, raw: dict) -> IntentClassification:
