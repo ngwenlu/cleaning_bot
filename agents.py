@@ -1,15 +1,5 @@
 """
 agents.py – All agent logic in one place.
-
-Business rules come entirely from knowledge_base.CONFIG.
-To change any rule, edit knowledge_base.py only.
-
-Architecture:
-classify()         -> detects intent, urgency, date/time flags
-run_booking()      -> collects booking form fields
-run_faq()          -> answers from knowledge base
-run_escalation()   -> human handoff
-process_message()  -> orchestrator entry point; returns Response, never raises
 """
 
 from __future__ import annotations
@@ -35,7 +25,7 @@ log = logging.getLogger(__name__)
 
 @dataclass
 class Response:
-    """Universal return type from any agent. Never raises; always has a message."""
+    """Universal return type from any agent. Never raises – always has a message."""
 
     message: str
     agent: str = "assistant"
@@ -54,18 +44,17 @@ def _llm(
 ) -> dict:
     """Call the LLM, parse JSON, return {} on any failure."""
     try:
-        response = client.chat.completions.create(
+        resp = client.chat.completions.create(
             model=model,
             max_completion_tokens=max_tokens,
             messages=[{"role": "system", "content": system}] + messages,
             response_format={"type": "json_object"},
         )
 
-        content = (response.choices[0].message.content or "").strip()
+        content = (resp.choices[0].message.content or "").strip()
 
         if content.startswith("```"):
-            content = content.split("\n", 1)[-1]
-            content = content.rsplit("```", 1)[0].strip()
+            content = content.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
 
         return json.loads(content) if content else {}
 
@@ -75,7 +64,7 @@ def _llm(
 
 
 def _get(raw: dict, key: str, fallback):
-    """Safe dict access with a fallback for missing or None values."""
+    """Safe dict access with a fallback for missing/None values."""
     value = raw.get(key)
     return value if value is not None else fallback
 
@@ -87,11 +76,6 @@ _CLASSIFY_SCHEMA = json.dumps(
         "urgency": "routine | high | critical",
         "confidence": "float 0.0-1.0",
         "reasoning": "one sentence",
-        "detected_date": "YYYY-MM-DD if user mentioned a date, else null",
-        "detected_time": "HH:MM if user mentioned a time, else null",
-        "is_emergency": "true if booking date is today or tomorrow",
-        "date_seems_wrong": "true if future date for complaint OR past date for booking",
-        "time_outside_hours": "true if time is outside service hours",
     },
     indent=2,
 )
@@ -100,18 +84,13 @@ _CLASSIFY_SCHEMA = json.dumps(
 def classify(message: str, history: list[dict]) -> dict:
     today = date.today()
 
-    system = f"""
-You are the intent and sentiment classifier for a cleaning service chatbot.
-
+    system = f"""You are the intent and sentiment classifier for a cleaning service chatbot.
 Today: {today.isoformat()} ({today.strftime("%A")})
 
 {CONFIG.rules_for_agents()}
 
-Classify the latest user message.
-
-Return ONLY valid JSON:
-{_CLASSIFY_SCHEMA}
-"""
+Classify the latest user message. Return ONLY valid JSON:
+{_CLASSIFY_SCHEMA}"""
 
     raw = _llm(
         system,
@@ -126,11 +105,6 @@ Return ONLY valid JSON:
         "urgency": raw.get("urgency", "routine"),
         "confidence": raw.get("confidence", 0.5),
         "reasoning": raw.get("reasoning", ""),
-        "detected_date": raw.get("detected_date"),
-        "detected_time": raw.get("detected_time"),
-        "is_emergency": bool(raw.get("is_emergency", False)),
-        "date_seems_wrong": bool(raw.get("date_seems_wrong", False)),
-        "time_outside_hours": bool(raw.get("time_outside_hours", False)),
     }
 
 
@@ -153,7 +127,7 @@ _BOOKING_SCHEMA = json.dumps(
             "requested_date": "YYYY-MM-DD or null",
             "requested_time": "HH:MM or null",
             "hours_needed": "number or null",
-            "has_pets": "boolean or null, where null means not yet asked",
+            "has_pets": "boolean or null",
             "contact": "phone or email if the customer volunteers it, else null",
             "notes": "any extra context, else null",
         },
@@ -165,80 +139,46 @@ _BOOKING_SCHEMA = json.dumps(
 )
 
 
-def run_booking(
-    message: str,
-    history: list[dict],
-    form: dict,
-) -> Response:
+def run_booking(message: str, history: list[dict], form: dict) -> Response:
     today = date.today()
+    filled = {k: v for k, v in form.items() if v is not None}
+    missing = [k for k in _BOOKING_REQUIRED if form.get(k) is None]
 
-    filled = {
-        key: value
-        for key, value in form.items()
-        if value is not None
-    }
-
-    missing = [
-        key
-        for key in _BOOKING_REQUIRED
-        if form.get(key) is None
-    ]
-
-    system = f"""
-You are the booking assistant for a cleaning service.
+    system = f"""You are the booking assistant for a cleaning service.
 
 Today: {today.isoformat()} ({today.strftime("%A")})
 
 {CONFIG.rules_for_agents()}
 
-TASK:
-Collect the 6 required booking fields, one or two at a time, conversationally.
+TASK: Collect the 6 required booking fields, one or two at a time, conversationally.
 
-Required fields:
-{_BOOKING_REQUIRED}
-
-Already collected. Do not re-ask:
-{json.dumps(filled, default=str)}
-
-Still missing:
-{missing}
+Required fields: {_BOOKING_REQUIRED}
+Already collected, do not re-ask: {json.dumps(filled, default=str)}
+Still missing: {missing}
 
 RULES:
-- Compute relative dates yourself. For example, "next Saturday" should be calculated and confirmed.
+- Compute relative dates yourself.
 - Reject and re-ask for past dates, impossible dates, and out-of-hours times.
-- For out-of-hours times, explain the allowed window and ask again. Do not crash.
-- Warn if start_time + hours_needed would exceed closing time, and suggest an earlier start.
-- NEVER confirm or commit to a booking. A salesperson will follow up.
+- For out-of-hours times, explain the allowed window and ask again.
+- Warn if start_time + hours_needed would exceed closing time.
+- NEVER confirm or commit to a booking.
 - When all 6 fields are collected, say:
-  "Thank you! I've noted everything down. Our salesperson will contact you shortly to confirm."
+  "Thank you! I’ve noted everything down. Our salesperson will contact you shortly to confirm."
 - Set escalate=true only if the date is today or tomorrow.
 
 Return ONLY valid JSON:
-{_BOOKING_SCHEMA}
-"""
+{_BOOKING_SCHEMA}"""
 
-    raw = _llm(
-        system,
-        history + [{"role": "user", "content": message}],
-    )
+    raw = _llm(system, history + [{"role": "user", "content": message}])
 
     new_collected = raw.get("collected") or {}
-
     updated_form = {
         **form,
-        **{
-            key: value
-            for key, value in new_collected.items()
-            if value is not None
-        },
+        **{k: v for k, v in new_collected.items() if v is not None},
     }
 
     return Response(
-        message=_get(
-            raw,
-            "message",
-            "Sorry, I didn't catch that. Could you repeat it?",
-        ),
+        message=_get(raw, "message", "Sorry, I didn't catch that — could you repeat it?"),
         agent="booking",
         form=updated_form,
         complete=bool(raw.get("is_complete", False)),
@@ -257,29 +197,19 @@ _FAQ_SCHEMA = json.dumps(
 )
 
 
-def run_faq(
-    message: str,
-    history: list[dict],
-) -> Response:
-    system = f"""
-You are the FAQ assistant for a cleaning service in Singapore.
-
-Answer ONLY using the knowledge base below.
-If the question is not covered, set answered=false.
+def run_faq(message: str, history: list[dict]) -> Response:
+    system = f"""You are the FAQ assistant for a cleaning service in Singapore.
+Answer ONLY using the knowledge base below. If the question is not covered, set answered=false.
 
 {CONFIG.rules_for_agents()}
 
-=== KNOWLEDGE BASE ===
+# === KNOWLEDGE BASE ===
 {get_full_kb_text()}
 
 Return ONLY valid JSON:
-{_FAQ_SCHEMA}
-"""
+{_FAQ_SCHEMA}"""
 
-    raw = _llm(
-        system,
-        history + [{"role": "user", "content": message}],
-    )
+    raw = _llm(system, history + [{"role": "user", "content": message}])
 
     sources = raw.get("sources", [])
 
@@ -297,11 +227,7 @@ Return ONLY valid JSON:
     answered = bool(raw.get("answered", True))
 
     return Response(
-        message=_get(
-            raw,
-            "message",
-            "Let me connect you with our team for more details.",
-        ),
+        message=_get(raw, "message", "Let me connect you with our team for more details."),
         agent="faq",
         escalate=not answered,
         debug={"sources": sources},
@@ -323,14 +249,8 @@ def run_escalation(
     history: list[dict],
     context: dict | None = None,
 ) -> Response:
-    system = f"""
-You are the escalation handler for a cleaning service chatbot.
-
-You are called for:
-- emergency bookings
-- complaints
-- unanswerable FAQs
-- explicit human requests
+    system = f"""You are the escalation handler for a cleaning service chatbot.
+You are called for emergency bookings, complaints, unanswerable FAQs, and explicit human requests.
 
 {CONFIG.rules_for_agents()}
 
@@ -338,24 +258,19 @@ Salesperson contacts:
 WhatsApp: {SALESPERSON_WHATSAPP}
 Email: {SALESPERSON_EMAIL}
 
-Context from classifier:
-{json.dumps(context or {}, default=str)}
+Context from classifier: {json.dumps(context or {}, default=str)}
 
 RULES:
-- Emergency booking today or tomorrow: reassure the customer and say the team will WhatsApp them shortly.
-- Complaint: empathise, do not argue, do not offer refunds, promise human follow-up.
-- Unanswerable FAQ: say you'll connect them with the team.
+- Emergency booking today/tomorrow: reassure the customer and say the team will WhatsApp them shortly.
+- Complaint: empathise, do not argue or offer refunds, promise human follow-up.
+- Unanswerable FAQ: say you’ll connect them with the team.
 - Out-of-hours request: explain the service window and ask for a valid time. Do NOT escalate as urgent.
-- Date/time mismatch where date_seems_wrong=true: point out the inconsistency and ask the customer to clarify.
+- Date/time mismatch: point out the inconsistency and ask the customer to clarify.
 
 Return ONLY valid JSON:
-{_ESCALATION_SCHEMA}
-"""
+{_ESCALATION_SCHEMA}"""
 
-    raw = _llm(
-        system,
-        history + [{"role": "user", "content": message}],
-    )
+    raw = _llm(system, history + [{"role": "user", "content": message}])
 
     return Response(
         message=_get(
@@ -379,18 +294,16 @@ def process_message(
 ) -> Response:
     """
     Process one user message end-to-end.
-    Never raises. Always returns a Response with a safe message.
+    NEVER raises – always returns a Response with a safe message.
     """
-    try:
-        classifier_result = classify(message, history)
 
-        intent = classifier_result["intent"]
-        is_emergency = classifier_result["is_emergency"]
-        date_wrong = classifier_result["date_seems_wrong"]
+    try:
+        clf = classify(message, history)
+        intent = clf["intent"]
 
         booking_started = any(
-            form.get(key)
-            for key in [
+            form.get(k)
+            for k in [
                 "customer_name",
                 "address",
                 "requested_date",
@@ -398,73 +311,38 @@ def process_message(
             ]
         )
 
-        if is_emergency or intent == "escalation":
-            response = run_escalation(
-                message,
-                history,
-                classifier_result,
-            )
+        if intent == "escalation":
+            resp = run_escalation(message, history, clf)
 
-        elif intent == "booking" or (
-            booking_started and intent not in ("feedback",)
-        ):
-            response = run_booking(
-                message,
-                history,
-                form,
-            )
+        elif intent == "booking" or (booking_started and intent != "feedback"):
+            resp = run_booking(message, history, form)
 
-            if response.escalate:
-                response = run_escalation(
-                    message,
-                    history,
-                    {
-                        **classifier_result,
-                        "form": response.form,
-                    },
-                )
-                response.form = form
+            if resp.escalate:
+                saved_form = resp.form
+                resp = run_escalation(message, history, {**clf, "form": saved_form})
+                resp.form = saved_form
 
         elif intent in ("faq", "out_of_scope"):
-            response = run_faq(
-                message,
-                history,
-            )
+            resp = run_faq(message, history)
 
-            if response.escalate:
-                response = run_escalation(
-                    message,
-                    history,
-                    classifier_result,
-                )
-
-        elif date_wrong:
-            response = run_escalation(
-                message,
-                history,
-                classifier_result,
-            )
+            if resp.escalate:
+                resp = run_escalation(message, history, clf)
 
         else:
-            response = run_faq(
-                message,
-                history,
-            )
+            resp = run_faq(message, history)
 
-        response.intent = intent
-
-        response.debug.update(
+        resp.intent = intent
+        resp.debug.update(
             {
                 "intent": intent,
-                "sentiment": classifier_result.get("sentiment"),
-                "urgency": classifier_result.get("urgency"),
-                "confidence": classifier_result.get("confidence"),
-                "reasoning": classifier_result.get("reasoning"),
-                "is_emergency": is_emergency,
+                "sentiment": clf.get("sentiment"),
+                "urgency": clf.get("urgency"),
+                "confidence": clf.get("confidence"),
+                "reasoning": clf.get("reasoning"),
             }
         )
 
-        return response
+        return resp
 
     except Exception as exc:
         log.error("process_message crashed: %s", exc, exc_info=True)
