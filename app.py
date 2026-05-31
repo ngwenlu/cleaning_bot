@@ -333,7 +333,7 @@ if st.button("🔄  Start new conversation", use_container_width=True):
 
 st.markdown(
 "<h1 style='font-family:\"DM Serif Display\",serif;font-size:28px;"
-"color:#\1C1C1C;margin-bottom:4px'>Hi there 👋</h1>”
+"color:#\1C1C1C;margin-bottom:4px'>Hi there 👋</h1>"
 "<p style='color:#6B7280;margin-top:0;margin-bottom:24px'>"
 "I can answer questions about our cleaning service or help get your booking details ready.</p>",
 unsafe_allow_html=True,
