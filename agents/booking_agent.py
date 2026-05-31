@@ -31,13 +31,13 @@ _SCHEMA = json.dumps(
 “requested_time”:      “HH:MM:SS or null”,
 “address”:             “string or null”,
 “postal_code”:         “string or null”,
-“apartment_type”:      “one of: hdb_1_2_room | hdb_3_room | hdb_4_room | hdb_5_room | condo_studio | condo_1_bed | condo_2_bed | condo_3_bed | landed | office | other — or null”,
+“apartment_type”:      “one of: hdb_1_2_room | hdb_3_room | hdb_4_room | hdb_5_room | condo_studio | condo_1_bed | condo_2_bed | condo_3_bed | landed | office | other – or null”,
 “hours_needed”:        “number or null”,
 “num_rooms”:           “integer or null”,
 “special_instructions”:“string or null”,
 “supplies_confirmed”:  “boolean”,
 },
-“is_complete”: “boolean — true only when ALL required fields are filled”,
+“is_complete”: “boolean – true only when ALL required fields are filled”,
 “next_field_to_ask”: “name of the next missing required field, or null if complete”,
 },
 indent=2,
@@ -67,7 +67,7 @@ def system_prompt(self) -> str:
 YOUR ROLE:
 
 - Collect the customer’s booking details across the conversation, one or two fields at a time.
-- Be friendly, concise, and conversational — don’t fire a list of questions all at once.
+- Be friendly, concise, and conversational – don’t fire a list of questions all at once.
 - Ask for one missing field at a time unless the user volunteers multiple at once.
 
 CRITICAL RULES:
@@ -79,14 +79,14 @@ CRITICAL RULES:
    your booking.”
 1. Always confirm that the customer will provide all cleaning supplies (mop, vacuum, detergents,
    cloths, gloves). If they haven’t acknowledged this, ask them to confirm before marking complete.
-1. If the requested date is today or tomorrow, DO NOT continue collecting details —
+1. If the requested date is today or tomorrow, DO NOT continue collecting details –
    respond with exactly this message:
    “This looks like an urgent booking! Let me connect you with our team right away.”
    Then set is_complete=false and next_field_to_ask=null.
 
 {_REQUIRED_FIELDS_DESC}
 
-When returning collected data, include ALL previously known values — this is the full current
+When returning collected data, include ALL previously known values – this is the full current
 state of the form, not just what was collected in this turn.
 
 Respond ONLY with a valid JSON object. No preamble, no markdown.
@@ -131,7 +131,7 @@ def run(  # type: ignore[override]
             if v is not None and v != {} and v is not False
         }
         extra = (
-            f"Current collected details (already known — do not re-ask):\n"
+            f"Current collected details (already known -- do not re-ask):\n"
             f"{json.dumps(filled, indent=2, default=str)}\n\n"
             f"Missing fields: {existing_details.missing_fields()}"
         )
