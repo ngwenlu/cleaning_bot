@@ -3,7 +3,7 @@ Static knowledge base for the FAQ Agent.
 Each entry has a key, a list of trigger topics, and the answer.
 """
 
-from **future** import annotations
+from __future__ import annotations
 from dataclasses import dataclass
 
 @dataclass
