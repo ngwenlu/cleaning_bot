@@ -1,4 +1,4 @@
-anthropic>=0.40.0
+openai>=1.100.0
 pydantic>=2.7.0
 streamlit>=1.35.0
 python-dotenv>=1.0.0
