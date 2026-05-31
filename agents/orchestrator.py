@@ -3,8 +3,8 @@ Orchestrator
 
 Entry point for every user message. Steps:
 
-1. Run IntentClassifier → get IntentClassification
-1. Apply routing rules (emergency always → escalation)
+1. Run IntentClassifier -> get IntentClassification
+1. Apply routing rules (emergency always -> escalation)
 1. Call the appropriate agent
 1. Return a ChatTurn
 
@@ -32,7 +32,7 @@ IntentClassification,
 OrchestratorDecision,
 )
 
-# ── Singleton agents (stateless — safe to reuse) ───────────────────────────
+# – Singleton agents (stateless – safe to reuse) —————————
 
 _intent_classifier = IntentClassifier()
 _booking_agent     = BookingAgent()
@@ -43,9 +43,9 @@ _follow_up_agent   = FollowUpAgent()
 def _routing_note(classification: IntentClassification, route_to: AgentType) -> str:
 notes = []
 if classification.is_emergency:
-notes.append(“Emergency booking detected — routed to escalation.”)
+notes.append(“Emergency booking detected – routed to escalation.”)
 if classification.confidence < 0.6:
-notes.append(f”Low confidence ({classification.confidence:.2f}) — monitor.”)
+notes.append(f”Low confidence ({classification.confidence:.2f}) – monitor.”)
 notes.append(f”Sentiment: {classification.sentiment}, Urgency: {classification.urgency}”)
 return “ | “.join(notes)
 
@@ -91,7 +91,7 @@ elif classification.intent in (Intent.COMPLAINT, Intent.ESCALATION):
 elif classification.intent == Intent.FEEDBACK:
     route_to = AgentType.FOLLOW_UP
 else:
-    # out_of_scope or anything else → FAQ agent handles gracefully
+    # out_of_scope or anything else -> FAQ agent handles gracefully
     route_to = AgentType.FAQ
 
 decision = OrchestratorDecision(
