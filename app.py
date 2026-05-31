@@ -82,16 +82,6 @@ section[data-testid="stSidebar"] h3 {
     line-height: 1.6;
 }
 
-.alert-urgent {
-    border-left: 4px solid #F97316;
-    background: #FFF7ED;
-    border-radius: 0 10px 10px 0;
-    padding: 12px 16px;
-    margin-top: 6px;
-    color: #1C1C1C;
-    line-height: 1.6;
-}
-
 .progress-card {
     background: rgba(255,255,255,.07);
     border-radius: 10px;
@@ -196,6 +186,7 @@ _BADGE_LABEL = {
 
 
 def _badge(agent: str) -> str:
+    agent = agent or "system"
     css = _BADGE_CSS.get(agent, "badge-system")
     label = _BADGE_LABEL.get(agent, agent.upper())
     return f'<span class="agent-badge {css}">{label}</span>'
@@ -212,7 +203,7 @@ def _render_assistant(
         safe = "<em style='color:#9CA3AF'>No response</em>"
 
     if agent == "escalation":
-        inner = f'<div class="alert-box" style="margin-top:6px">{safe}</div>'
+        inner = f'<div class="alert-box">{safe}</div>'
     else:
         inner = (
             '<p style="margin:6px 0 0 0;font-size:15px;'
@@ -269,9 +260,9 @@ def _render_form_progress(form: dict) -> None:
 
     for label, value in fields:
         icon = (
-            '<span class="check-done">O</span>'
+            '<span class="check-done">●</span>'
             if value
-            else '<span class="check-empty">o</span>'
+            else '<span class="check-empty">○</span>'
         )
 
         display = (
@@ -289,7 +280,7 @@ def _render_form_progress(form: dict) -> None:
         f"""
 <div class="progress-card">
   <div style="font-size:11px;letter-spacing:.07em;color:#9BBFB3;margin-bottom:6px">
-    BOOKING FORM . {filled}/{len(fields)} fields
+    BOOKING FORM · {filled}/{len(fields)} fields
   </div>
   <div style="background:rgba(255,255,255,.1);border-radius:999px;height:4px;margin-bottom:10px">
     <div style="background:#4ADE80;width:{pct}%;height:4px;border-radius:999px"></div>
@@ -307,7 +298,7 @@ with st.sidebar:
 <div class="company-header">
     <span class="company-icon">🧹</span>
     <span class="company-name">Dad's Cleaning</span>
-    <span class="company-tagline">PART-TIME HOME CLEANING . SINGAPORE</span>
+    <span class="company-tagline">PART-TIME HOME CLEANING · SINGAPORE</span>
 </div>
 """,
         unsafe_allow_html=True,
@@ -323,6 +314,7 @@ with st.sidebar:
             "customer_name",
             "address",
             "requested_date",
+            "requested_time",
         ]
     ):
         st.markdown(
@@ -335,13 +327,18 @@ with st.sidebar:
     debug = st.session_state.last_debug
 
     if debug:
-        with st.expander("🔍 Last classification", expanded=False):
+        with st.expander("🔍 Last classification", expanded=True):
             rows = [
                 ("Intent", debug.get("intent")),
-                ("Sentiment", debug.get("sentiment")),
-                ("Urgency", debug.get("urgency")),
-                ("Confidence", f"{debug.get('confidence', 0):.0%}"),
-                ("Emergency", "[!] YES" if debug.get("is_emergency") else "No"),
+                ("Agent", debug.get("agent")),
+                ("Emergency", "YES" if debug.get("is_emergency") else "No"),
+                ("Date text", debug.get("date_text")),
+                ("Time text", debug.get("time_text")),
+                ("Detected date", debug.get("detected_date")),
+                ("Detected time", debug.get("detected_time")),
+                ("Date too far", debug.get("date_too_far")),
+                ("Time too late", debug.get("time_too_late")),
+                ("Outside hours", debug.get("time_outside_hours")),
             ]
 
             for label, value in rows:
@@ -351,11 +348,8 @@ with st.sidebar:
                     unsafe_allow_html=True,
                 )
 
-            if debug.get("reasoning"):
-                st.markdown(
-                    f"<div style='font-size:11px;color:#9CA3AF;margin-top:6px'>{_html.escape(str(debug['reasoning']))}</div>",
-                    unsafe_allow_html=True,
-                )
+        with st.expander("🧪 Full debug JSON", expanded=False):
+            st.json(debug)
 
     st.markdown("---")
 
@@ -412,10 +406,17 @@ if prompt := st.chat_input("Type your message..."):
                 form=st.session_state.form,
             )
 
+        # IMPORTANT:
+        # Badge is based ONLY on response.agent.
+        # Do not use debug["urgency"], debug["sentiment"], or response.escalate for the badge.
+        agent = response.agent or "system"
+
+        response.debug["agent"] = agent
+
         _render_assistant(
-            _badge(response.agent),
+            _badge(agent),
             response.message,
-            response.agent,
+            agent,
         )
 
     st.session_state.form = response.form
@@ -440,7 +441,7 @@ if prompt := st.chat_input("Type your message..."):
         {
             "role": "assistant",
             "content": response.message,
-            "agent": response.agent,
+            "agent": agent,
         }
     )
 
