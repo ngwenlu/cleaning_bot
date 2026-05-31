@@ -324,6 +324,15 @@ Return ONLY valid JSON:
     )
 
     log.warning("DEBUG CLASSIFIER: %s", clf)
+    print("=" * 50)
+    print("MESSAGE:", message)
+    print("DATE TEXT:", date_text)
+    print("TIME TEXT:", time_text)
+    print("DETECTED DATE:", detected_date)
+    print("DETECTED TIME:", detected_time)
+    print("TIME TOO LATE:", clf["time_too_late"])
+    print("IS EMERGENCY:", clf["is_emergency"])
+    print("=" * 50)
 
     return clf
 
