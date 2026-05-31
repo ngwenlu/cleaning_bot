@@ -674,6 +674,17 @@ def process_message(
 
         resp.intent = intent
 
+        # ------------------------------------------------------------------
+        # Never allow booking flow to become escalation
+        # ------------------------------------------------------------------
+
+        if resp.agent == "booking":
+            resp.escalate = False
+
+        if intent == "booking":
+            resp.agent = "booking"
+            resp.escalate = False
+
         resp.debug.update(
             {
                 "intent": intent,
