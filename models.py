@@ -114,6 +114,14 @@ class IntentClassification(BaseModel):
         False,
         description="True when the requested date is today or tomorrow.",
     )
+    date_seems_wrong: bool = Field(
+        False,
+        description=(
+            "True when the date is logically inconsistent with the intent: "
+            "a past date given for a booking, or a future date given for a complaint/feedback. "
+            "The date must be clarified before proceeding."
+        ),
+    )
     detected_date: Optional[date] = Field(
         None,
         description="Booking date explicitly mentioned by the user, if any",
@@ -135,7 +143,7 @@ class IntentClassification(BaseModel):
 
     @model_validator(mode="after")
     def sync_emergency_flag(self) -> "IntentClassification":
-        """If the detected date is today or tomorrow, force emergency."""
+        """Derive is_emergency and date_seems_wrong from detected_date and intent."""
         if self.detected_date is not None:
             delta = (self.detected_date - date.today()).days
 
@@ -143,6 +151,18 @@ class IntentClassification(BaseModel):
                 self.is_emergency = True
                 self.intent = Intent.EMERGENCY_BOOKING
                 self.urgency = UrgencyLevel.CRITICAL
+
+            elif delta > 1 and self.intent in (
+                Intent.COMPLAINT,
+                Intent.FEEDBACK,
+            ):
+                self.date_seems_wrong = True
+
+            elif delta < 0 and self.intent in (
+                Intent.BOOKING_ENQUIRY,
+                Intent.EMERGENCY_BOOKING,
+            ):
+                self.date_seems_wrong = True
 
         return self
 
@@ -173,12 +193,21 @@ class BookingDetails(BaseModel):
     )
 
     is_emergency: bool = False
+    date_in_past: bool = Field(
+        False,
+        description="True when requested_date is before today, invalid for booking.",
+    )
 
     @model_validator(mode="after")
-    def flag_emergency(self) -> "BookingDetails":
+    def flag_date_issues(self) -> "BookingDetails":
         if self.requested_date is not None:
             delta = (self.requested_date - date.today()).days
             self.is_emergency = delta in (0, 1)
+            self.date_in_past = delta < 0
+
+            if self.date_in_past:
+                self.requested_date = None
+                self.is_emergency = False
 
         return self
 
