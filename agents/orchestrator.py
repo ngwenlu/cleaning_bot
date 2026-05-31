@@ -18,10 +18,10 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from agents.booking import BookingAgent
-from agents.escalation import EscalationAgent
-from agents.faq import FAQAgent
-from agents.follow_up import FollowUpAgent
+from agents.booking_agent import BookingAgent
+from agents.escalation_agent import EscalationAgent
+from agents.faq_agent import FAQAgent
+from agents.follow_up_agent import FollowUpAgent
 from agents.intent_classifier import IntentClassifier
 
 from models import (
