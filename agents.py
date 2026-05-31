@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 
 @dataclass
 class Response:
-    """Universal return type from any agent. Never raises – always has a message."""
+    """Universal return type. Never raises – always has a message."""
 
     message: str
     agent: str = "assistant"
@@ -66,8 +66,6 @@ def _llm(
 
 
 def _get(raw: dict, key: str, fallback):
-    """Safe dict access with a fallback for missing/None values."""
-
     value = raw.get(key)
     return value if value is not None else fallback
 
@@ -89,13 +87,41 @@ _CLASSIFY_SCHEMA = json.dumps(
 def classify(message: str, history: list[dict]) -> dict:
     today = date.today()
 
-    system = f"""You are the intent and sentiment classifier for a cleaning service chatbot.
-Today: {today.isoformat()} ({today.strftime("%A")})
+    system = f"""<system>
+  <role>
+    Intent and sentiment classifier for a cleaning service chatbot.
+    You extract intent and any mentioned date/time strings.
+    You do NOT compute whether dates are valid.
+  </role>
 
+  <context>
+    <today>{today.isoformat()} ({today.strftime("%A")})</today>
+  </context>
+
+  <business_rules>
 {CONFIG.rules_for_agents()}
+  </business_rules>
 
-Classify the latest user message. Return ONLY valid JSON:
-{_CLASSIFY_SCHEMA}"""
+  <intent_definitions>
+    <intent name="booking">User wants to schedule a cleaning session.</intent>
+    <intent name="faq">User has a question about the service, pricing, hours, etc.</intent>
+    <intent name="escalation">User wants to speak to a human or situation needs urgent attention.</intent>
+    <intent name="feedback">User is giving feedback or complaining about a past session.</intent>
+    <intent name="out_of_scope">Unrelated to the cleaning business.</intent>
+  </intent_definitions>
+
+  <date_time_extraction>
+    Extract detected_date and detected_time as plain strings only.
+    Do NOT judge whether they are valid, past, future, or in-hours.
+    For relative dates like "tomorrow" or "next Saturday", return the ISO date string.
+    Use today ({today.isoformat()}) as the reference for resolving relative dates.
+  </date_time_extraction>
+
+  <output_format>
+    Return ONLY valid JSON with no preamble:
+{_CLASSIFY_SCHEMA}
+  </output_format>
+</system>"""
 
     raw = _llm(
         system,
@@ -117,6 +143,8 @@ Classify the latest user message. Return ONLY valid JSON:
     emergency_window = CONFIG.booking.emergency_window_days
     start_hour = CONFIG.hours.start_hour
     end_hour = CONFIG.hours.end_hour
+    min_hours = int(CONFIG.booking.min_hours)
+    max_advance_days = CONFIG.booking.max_advance_days
 
     detected_date = None
     if clf["detected_date"]:
@@ -136,9 +164,19 @@ Classify the latest user message. Return ONLY valid JSON:
 
     clf["is_emergency"] = detected_date is not None and 0 <= delta <= emergency_window
     clf["date_in_past"] = detected_date is not None and delta < 0
+    clf["date_too_far"] = (
+        detected_date is not None
+        and delta is not None
+        and delta > max_advance_days
+    )
     clf["time_outside_hours"] = (
         detected_time_obj is not None
         and (detected_time_obj.hour < start_hour or detected_time_obj.hour >= end_hour)
+    )
+    clf["time_too_late"] = (
+        detected_time_obj is not None
+        and not clf["time_outside_hours"]
+        and detected_time_obj.hour >= (end_hour - min_hours)
     )
     clf["date_seems_wrong"] = (
         clf["date_in_past"] and clf["intent"] == "booking"
@@ -193,54 +231,80 @@ def run_booking(
     filled = {k: v for k, v in form.items() if v is not None}
     missing = [k for k in _BOOKING_REQUIRED if form.get(k) is None]
 
-    date_notes = []
+    alerts = []
 
     if clf:
         if clf.get("date_in_past") and clf.get("detected_date"):
-            date_notes.append(
-                f"CRITICAL: {clf['detected_date']} is in the past. "
-                "Reject it and ask for a future date."
+            alerts.append(
+                f"The date {clf['detected_date']} has already passed. "
+                "Tell the customer this date is in the past and ask for a future date."
+            )
+
+        if clf.get("date_too_far") and clf.get("detected_date"):
+            alerts.append(
+                f"The booking date {clf['detected_date']} is too far in advance. "
+                f"The maximum is {CONFIG.booking.max_advance_days // 30} months ahead."
+            )
+
+        if clf.get("time_too_late") and clf.get("detected_time"):
+            alerts.append(
+                f"The start time {clf['detected_time']} is too late. "
+                f"The latest start time is {CONFIG.hours.latest_start(CONFIG.booking.min_hours)}."
             )
 
         if clf.get("time_outside_hours") and clf.get("detected_time"):
-            date_notes.append(
-                f"CRITICAL: {clf['detected_time']} is outside service hours "
-                f"({CONFIG.hours.start_label}-{CONFIG.hours.end_label}). "
-                "Reject it and ask for a valid time."
+            alerts.append(
+                f"The time {clf['detected_time']} is outside service hours "
+                f"({CONFIG.hours.start_label}-{CONFIG.hours.end_label})."
             )
 
         if clf.get("is_emergency") and clf.get("detected_date"):
-            date_notes.append(
-                f"CRITICAL: {clf['detected_date']} is an emergency booking. "
-                "Set escalate=true immediately."
+            alerts.append(
+                f"The date {clf['detected_date']} is today or tomorrow. "
+                "This is an emergency booking. Set escalate=true."
             )
 
-    date_context = "\n".join(date_notes)
+    alerts_xml = ""
+    if alerts:
+        items = "\n".join(f"    <alert>{alert}</alert>" for alert in alerts)
+        alerts_xml = f"\n  <datetime_alerts>\n{items}\n  </datetime_alerts>"
 
-    system = f"""You are the booking assistant for a cleaning service.
+    system = f"""<system>
+  <role>
+    Booking assistant for a cleaning service.
+    Collect required booking details conversationally, one or two fields at a time.
+    You do NOT confirm or commit to any booking.
+  </role>
 
-Today: {today.isoformat()} ({today.strftime("%A")})
+  <context>
+    <today>{today.isoformat()} ({today.strftime("%A")})</today>
+  </context>
 
+  <business_rules>
 {CONFIG.rules_for_agents()}
+  </business_rules>
+{alerts_xml}
 
-{date_context}
+  <form_state>
+    <required_fields>{_BOOKING_REQUIRED}</required_fields>
+    <already_collected>{json.dumps(filled, default=str)}</already_collected>
+    <still_missing>{missing}</still_missing>
+  </form_state>
 
-TASK: Collect the 6 required booking fields, one or two at a time.
+  <rules>
+    <rule>Compute relative dates yourself.</rule>
+    <rule>Reject and re-ask if date is in the past, too far ahead, out of hours, or too late to start.</rule>
+    <rule>When all 6 required fields are filled, say: "Thank you! I've noted everything down. Our salesperson will contact you shortly to confirm."</rule>
+    <rule>Set escalate=true only if the booking date is today or tomorrow.</rule>
+    <rule>NEVER say the booking is confirmed.</rule>
+    <rule>If datetime_alerts are present, address them immediately before asking for the next field.</rule>
+  </rules>
 
-Required fields: {_BOOKING_REQUIRED}
-Already collected: {json.dumps(filled, default=str)}
-Still missing: {missing}
-
-RULES:
-- Compute relative dates yourself.
-- Reject past dates, impossible dates, and out-of-hours times.
-- NEVER confirm or commit to a booking.
-- When all 6 fields are collected, say:
-  "Thank you! I’ve noted everything down. Our salesperson will contact you shortly to confirm."
-- Set escalate=true only if the date is today or tomorrow.
-
-Return ONLY valid JSON:
-{_BOOKING_SCHEMA}"""
+  <output_format>
+    Return ONLY valid JSON with no preamble:
+{_BOOKING_SCHEMA}
+  </output_format>
+</system>"""
 
     raw = _llm(system, history + [{"role": "user", "content": message}])
 
@@ -271,16 +335,32 @@ _FAQ_SCHEMA = json.dumps(
 
 
 def run_faq(message: str, history: list[dict]) -> Response:
-    system = f"""You are the FAQ assistant for a cleaning service in Singapore.
-Answer ONLY using the knowledge base below. If the question is not covered, set answered=false.
+    system = f"""<system>
+  <role>
+    FAQ assistant for a cleaning service in Singapore.
+    Answer questions using ONLY the knowledge base provided.
+    If the question is not covered, set answered=false.
+  </role>
 
+  <business_rules>
 {CONFIG.rules_for_agents()}
+  </business_rules>
 
-# === KNOWLEDGE BASE ===
+  <knowledge_base>
 {get_full_kb_text()}
+  </knowledge_base>
 
-Return ONLY valid JSON:
-{_FAQ_SCHEMA}"""
+  <rules>
+    <rule>Answer only from the knowledge base. Do not invent information.</rule>
+    <rule>If the question is not covered, set answered=false.</rule>
+    <rule>Keep answers friendly and concise.</rule>
+  </rules>
+
+  <output_format>
+    Return ONLY valid JSON with no preamble:
+{_FAQ_SCHEMA}
+  </output_format>
+</system>"""
 
     raw = _llm(system, history + [{"role": "user", "content": message}])
 
@@ -320,25 +400,38 @@ def run_escalation(
     history: list[dict],
     context: dict | None = None,
 ) -> Response:
-    system = f"""You are the escalation handler for a cleaning service chatbot.
+    system = f"""<system>
+  <role>
+    Escalation handler for a cleaning service chatbot.
+    You handle emergency bookings, complaints, unanswerable FAQs, and explicit human requests.
+  </role>
 
+  <business_rules>
 {CONFIG.rules_for_agents()}
+  </business_rules>
 
-Salesperson contacts:
-WhatsApp: {SALESPERSON_WHATSAPP}
-Email: {SALESPERSON_EMAIL}
+  <salesperson_contacts>
+    <whatsapp>{SALESPERSON_WHATSAPP}</whatsapp>
+    <email>{SALESPERSON_EMAIL}</email>
+  </salesperson_contacts>
 
-Context from classifier: {json.dumps(context or {}, default=str)}
+  <classifier_context>
+{json.dumps(context or {}, indent=4, default=str)}
+  </classifier_context>
 
-RULES:
-- Emergency booking: reassure the customer and say the team will WhatsApp them shortly.
-- Complaint: empathise and promise human follow-up.
-- Unanswerable FAQ: say you’ll connect them with the team.
-- Out-of-hours request: explain the service window and ask for a valid time.
-- Date/time mismatch: ask the customer to clarify.
+  <rules>
+    <rule>Emergency booking: reassure the customer and say the team will WhatsApp them shortly. Set urgency=critical.</rule>
+    <rule>Complaint or negative feedback: empathise and promise a human will follow up. Set urgency=high.</rule>
+    <rule>Unanswerable FAQ: politely say you will connect them with the team. Set urgency=routine.</rule>
+    <rule>Out-of-hours or invalid time: explain the service window and ask for a valid time. Do NOT treat as urgent.</rule>
+    <rule>Date mismatch: point out the inconsistency clearly and ask the customer to confirm the correct date.</rule>
+  </rules>
 
-Return ONLY valid JSON:
-{_ESCALATION_SCHEMA}"""
+  <output_format>
+    Return ONLY valid JSON with no preamble:
+{_ESCALATION_SCHEMA}
+  </output_format>
+</system>"""
 
     raw = _llm(system, history + [{"role": "user", "content": message}])
 
@@ -363,8 +456,8 @@ def process_message(
     form: dict,
 ) -> Response:
     """
-    Process one user message end-to-end.
-    NEVER raises – always returns a Response with a safe message.
+    Single public entry point. Runs on every message.
+    NEVER raises – always returns a Response.
     """
 
     try:
@@ -420,7 +513,9 @@ def process_message(
                 "reasoning": clf.get("reasoning"),
                 "is_emergency": clf.get("is_emergency"),
                 "date_in_past": clf.get("date_in_past"),
+                "date_too_far": clf.get("date_too_far"),
                 "time_outside_hours": clf.get("time_outside_hours"),
+                "time_too_late": clf.get("time_too_late"),
                 "detected_date": clf.get("detected_date"),
                 "detected_time": clf.get("detected_time"),
             }
