@@ -143,6 +143,15 @@ section[data-testid="stSidebar"] h3 {
     font-weight: 500;
 }
 
+.main-debug-box {
+    background: #111827;
+    color: #E5E7EB;
+    border-radius: 12px;
+    padding: 10px 12px;
+    margin-bottom: 16px;
+    font-size: 12px;
+}
+
 #MainMenu, footer, header {
     visibility: hidden;
 }
@@ -292,6 +301,45 @@ def _render_form_progress(form: dict) -> None:
     )
 
 
+def _render_debug_panel(debug: dict) -> None:
+    if not debug:
+        return
+
+    with st.expander("🔍 Debug panel", expanded=True):
+        cols = st.columns(2)
+
+        with cols[0]:
+            st.write("**Route**")
+            st.json(
+                {
+                    "agent": debug.get("agent"),
+                    "intent": debug.get("intent"),
+                    "is_emergency": debug.get("is_emergency"),
+                    "escalate": debug.get("escalate"),
+                }
+            )
+
+        with cols[1]:
+            st.write("**Date / Time**")
+            st.json(
+                {
+                    "date_text": debug.get("date_text"),
+                    "time_text": debug.get("time_text"),
+                    "detected_date": debug.get("detected_date"),
+                    "detected_time": debug.get("detected_time"),
+                    "max_booking_date": debug.get("max_booking_date"),
+                    "date_in_past": debug.get("date_in_past"),
+                    "date_too_far": debug.get("date_too_far"),
+                    "time_outside_hours": debug.get("time_outside_hours"),
+                    "time_too_late": debug.get("time_too_late"),
+                    "duration_validation_failed": debug.get("duration_validation_failed"),
+                }
+            )
+
+        st.write("**Full debug**")
+        st.json(debug)
+
+
 with st.sidebar:
     st.markdown(
         """
@@ -327,7 +375,7 @@ with st.sidebar:
     debug = st.session_state.last_debug
 
     if debug:
-        with st.expander("🔍 Last classification", expanded=True):
+        with st.expander("🔍 Last classification", expanded=False):
             rows = [
                 ("Intent", debug.get("intent")),
                 ("Agent", debug.get("agent")),
@@ -339,6 +387,7 @@ with st.sidebar:
                 ("Date too far", debug.get("date_too_far")),
                 ("Time too late", debug.get("time_too_late")),
                 ("Outside hours", debug.get("time_outside_hours")),
+                ("Duration fail", debug.get("duration_validation_failed")),
             ]
 
             for label, value in rows:
@@ -383,6 +432,10 @@ st.markdown(
 )
 
 
+# Main-page debug panel for mobile
+_render_debug_panel(st.session_state.last_debug)
+
+
 for message in st.session_state.messages:
     _render_message(message)
 
@@ -406,12 +459,12 @@ if prompt := st.chat_input("Type your message..."):
                 form=st.session_state.form,
             )
 
-        # IMPORTANT:
-        # Badge is based ONLY on response.agent.
-        # Do not use debug["urgency"], debug["sentiment"], or response.escalate for the badge.
         agent = response.agent or "system"
 
         response.debug["agent"] = agent
+        response.debug["escalate"] = response.escalate
+        response.debug["message_preview"] = response.message[:300]
+        response.debug["form"] = response.form
 
         _render_assistant(
             _badge(agent),
