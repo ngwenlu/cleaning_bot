@@ -15,7 +15,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Any
 
-from config import MAX_COMPLETION_TOKENS, MODEL, client
+from config import MAX_TOKENS, MODEL, client
 from models import ConversationMessage
 
 logger = logging.getLogger(__name__)
@@ -79,7 +79,7 @@ class BaseAgent(ABC):
             response = client.chat.completions.create(
                 model=MODEL,
                 messages=openai_messages,
-                max_tokens=MAX_COMPLETION_TOKENS,
+                max_completion_tokens=MAX_TOKENS,
             )
         except Exception as exc:
             logger.error("OpenAI API call failed: %s", exc)
