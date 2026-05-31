@@ -27,8 +27,8 @@ Abstract base for all agents.
 
 ```
 Subclasses implement:
-  - system_prompt (property) → str
-  - parse_response(raw_json: dict) → the appropriate Pydantic model
+  - system_prompt (property) -> str
+  - parse_response(raw_json: dict) -> the appropriate Pydantic model
 """
 
 @property
@@ -38,7 +38,7 @@ def system_prompt(self) -> str: ...
 @abstractmethod
 def parse_response(self, raw: dict) -> Any: ...
 
-# ── Core call ──────────────────────────────────────────────────────────
+# -- Core call ----------------------------------------------------------
 
 def _call_llm(
     self,
@@ -95,7 +95,7 @@ def _call_llm(
         logger.error("Non-JSON response from model:\n%s", raw_text)
         raise ValueError(f"Model returned non-JSON output: {exc}") from exc
 
-# ── Public interface ───────────────────────────────────────────────────
+# -- Public interface ---------------------------------------------------
 
 def run(
     self,
