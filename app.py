@@ -28,7 +28,7 @@ from agents.orchestrator import process_message
 
 
 st.set_page_config(
-    page_title="CleanBot | Dad’s Cleaning",
+    page_title="CleanBot | Dad's Cleaning",
     page_icon="🧹",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -175,7 +175,7 @@ section[data-testid="stSidebar"] .stMarkdown hr {
 )
 
 
-def _init_state():
+def _init_state() -> None:
     if "session_id" not in st.session_state:
         st.session_state.session_id = str(uuid.uuid4())
 
@@ -216,7 +216,7 @@ def _agent_badge(agent_type: AgentType | str) -> str:
     return f'<span class="agent-badge {cls}">{label}</span>'
 
 
-def _render_booking_progress(bd: BookingDetails):
+def _render_booking_progress(bd: BookingDetails) -> None:
     fields = [
         ("Name", bd.customer.name),
         ("Contact", bd.customer.phone or bd.customer.email),
@@ -233,14 +233,14 @@ def _render_booking_progress(bd: BookingDetails):
 
     for label, value in fields:
         icon = (
-            '<span class="check-done">●</span>'
+            '<span class="check-done">O</span>'
             if value
-            else '<span class="check-empty">○</span>'
+            else '<span class="check-empty">o</span>'
         )
         display = (
             f"<b style='color:#E8F0ED'>{value}</b>"
             if value
-            else "<span style='color:#6B7280'>–</span>"
+            else "<span style='color:#6B7280'>-</span>"
         )
         rows += (
             f'<div class="progress-row">{icon} '
@@ -253,7 +253,7 @@ def _render_booking_progress(bd: BookingDetails):
         f"""
 <div class="progress-card">
     <div style="font-size:11px;letter-spacing:.07em;color:#9BBFB3;margin-bottom:6px">
-        BOOKING FORM &nbsp;•&nbsp; {filled}/{len(fields)} fields
+        BOOKING FORM &nbsp;.&nbsp; {filled}/{len(fields)} fields
     </div>
     <div style="background:rgba(255,255,255,.1);border-radius:999px;height:4px;margin-bottom:10px">
         <div style="background:#4ADE80;width:{pct}%;height:4px;border-radius:999px;transition:width .4s"></div>
@@ -265,25 +265,30 @@ def _render_booking_progress(bd: BookingDetails):
     )
 
 
-def _render_message(msg: dict):
+def _render_message(msg: dict) -> None:
     role = msg["role"]
-    content = msg["content"]
+    content = msg.get("content") or ""
     agent_type = msg.get("agent_type")
     metadata = msg.get("metadata", {})
     is_emergency = metadata.get("is_emergency", False)
 
     with st.chat_message(role, avatar="🧹" if role == "assistant" else "👤"):
-        if role == "assistant" and agent_type:
-            st.markdown(_agent_badge(agent_type), unsafe_allow_html=True)
+        if role != "assistant":
+            st.markdown(content)
+            return
 
-        if role == "assistant" and agent_type == AgentType.ESCALATION:
+        badge = _agent_badge(agent_type) if agent_type else ""
+
+        if agent_type == AgentType.ESCALATION:
             box_class = "emergency-box" if is_emergency else "escalation-box"
             st.markdown(
-                f'<div class="{box_class}">{content}</div>',
+                f'{badge}<div class="{box_class}" style="margin-top:6px">{content}</div>',
                 unsafe_allow_html=True,
             )
         else:
-            st.markdown(content)
+            if badge:
+                st.markdown(badge, unsafe_allow_html=True)
+            st.write(content if content else "_No response_")
 
 
 with st.sidebar:
@@ -291,8 +296,8 @@ with st.sidebar:
         """
 <div class="company-header">
     <span class="company-icon">🧹</span>
-    <span class="company-name">Dad’s Cleaning</span>
-    <span class="company-tagline">PART-TIME HOME CLEANING • SINGAPORE</span>
+    <span class="company-name">Dad's Cleaning</span>
+    <span class="company-tagline">PART-TIME HOME CLEANING . SINGAPORE</span>
 </div>
 """,
         unsafe_allow_html=True,
@@ -322,7 +327,7 @@ with st.sidebar:
     if clf:
         with st.expander("🔍 Last classification", expanded=False):
 
-            def _row(label, value):
+            def _row(label: str, value: str) -> None:
                 st.markdown(
                     f'<div class="debug-row"><span>{label}</span>'
                     f'<span class="debug-val">{value}</span></div>',
@@ -333,7 +338,7 @@ with st.sidebar:
             _row("Sentiment", clf.sentiment.value)
             _row("Urgency", clf.urgency.value)
             _row("Confidence", f"{clf.confidence:.0%}")
-            _row("Emergency", "YES" if clf.is_emergency else "No")
+            _row("Emergency", "[!] YES" if clf.is_emergency else "No")
 
             if clf.reasoning:
                 st.markdown(
@@ -357,6 +362,12 @@ with st.sidebar:
 
         st.rerun()
 
+    st.markdown(
+        "<div style='font-size:11px;color:#4A7A6E;text-align:center;margin-top:12px'>"
+        "Powered by OpenAI</div>",
+        unsafe_allow_html=True,
+    )
+
 
 st.markdown(
     "<h1 style='font-family:\"DM Serif Display\",serif;font-size:28px;"
@@ -371,7 +382,7 @@ for msg in st.session_state.messages:
     _render_message(msg)
 
 
-if prompt := st.chat_input("Type your message…"):
+if prompt := st.chat_input("Type your message..."):
     user_msg_dict = {"role": "user", "content": prompt}
     st.session_state.messages.append(user_msg_dict)
 
@@ -408,17 +419,17 @@ if prompt := st.chat_input("Type your message…"):
             reply_text = str(response)
 
         is_emergency = clf.is_emergency
-
-        st.markdown(_agent_badge(route_to), unsafe_allow_html=True)
+        badge = _agent_badge(route_to)
 
         if route_to == AgentType.ESCALATION:
             box_class = "emergency-box" if is_emergency else "escalation-box"
             st.markdown(
-                f'<div class="{box_class}">{reply_text}</div>',
+                f'{badge}<div class="{box_class}" style="margin-top:6px">{reply_text}</div>',
                 unsafe_allow_html=True,
             )
         else:
-            st.markdown(reply_text)
+            st.markdown(badge, unsafe_allow_html=True)
+            st.write(reply_text if reply_text else "_No response_")
 
     st.session_state.last_classification = clf
 
