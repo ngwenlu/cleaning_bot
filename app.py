@@ -6,6 +6,7 @@ Calls agents.process_message(); has no business logic of its own.
 from __future__ import annotations
 
 import html as _html
+import json
 import os
 import sys
 import uuid
@@ -143,15 +144,6 @@ section[data-testid="stSidebar"] h3 {
     font-weight: 500;
 }
 
-.main-debug-box {
-    background: #111827;
-    color: #E5E7EB;
-    border-radius: 12px;
-    padding: 10px 12px;
-    margin-bottom: 16px;
-    font-size: 12px;
-}
-
 #MainMenu, footer, header {
     visibility: hidden;
 }
@@ -163,14 +155,14 @@ section[data-testid="stSidebar"] h3 {
 
 def _init() -> None:
     defaults = {
-    "session_id": str(uuid.uuid4()),
-    "messages": [],
-    "history": [],
-    "form": {},
-    "last_debug": {},
-    "debug_log": [],
-    "turn": 1,
-}
+        "session_id": str(uuid.uuid4()),
+        "messages": [],
+        "history": [],
+        "form": {},
+        "last_debug": {},
+        "debug_log": [],
+        "turn": 1,
+    }
 
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -202,11 +194,7 @@ def _badge(agent: str) -> str:
     return f'<span class="agent-badge {css}">{label}</span>'
 
 
-def _render_assistant(
-    badge_html: str,
-    body: str,
-    agent: str,
-) -> None:
+def _render_assistant(badge_html: str, body: str, agent: str) -> None:
     if body:
         safe = _html.escape(body).replace("\n", "<br>")
     else:
@@ -220,10 +208,7 @@ def _render_assistant(
             f'color:#1C1C1C;line-height:1.6">{safe}</p>'
         )
 
-    st.markdown(
-        f"{badge_html}{inner}",
-        unsafe_allow_html=True,
-    )
+    st.markdown(f"{badge_html}{inner}", unsafe_allow_html=True)
 
 
 def _render_message(msg: dict) -> None:
@@ -231,18 +216,11 @@ def _render_message(msg: dict) -> None:
     content = msg.get("content", "")
     agent = msg.get("agent", "faq")
 
-    with st.chat_message(
-        role,
-        avatar="🧹" if role == "assistant" else "👤",
-    ):
+    with st.chat_message(role, avatar="🧹" if role == "assistant" else "👤"):
         if role == "user":
             st.markdown(content)
         else:
-            _render_assistant(
-                _badge(agent),
-                content,
-                agent,
-            )
+            _render_assistant(_badge(agent), content, agent)
 
 
 def _render_form_progress(form: dict) -> None:
@@ -251,10 +229,7 @@ def _render_form_progress(form: dict) -> None:
         ("Address", form.get("address")),
         ("Date", form.get("requested_date")),
         ("Start time", form.get("requested_time")),
-        (
-            "Hours",
-            str(form["hours_needed"]) if form.get("hours_needed") else None,
-        ),
+        ("Hours", str(form["hours_needed"]) if form.get("hours_needed") else None),
         (
             "Pets",
             "Yes"
@@ -317,6 +292,7 @@ def _render_debug_panel(debug: dict) -> None:
                     "intent": debug.get("intent"),
                     "is_emergency": debug.get("is_emergency"),
                     "escalate": debug.get("escalate"),
+                    "complete": debug.get("complete"),
                 }
             )
 
@@ -400,23 +376,16 @@ with st.sidebar:
 
         with st.expander("🧪 Full debug JSON", expanded=False):
             st.json(debug)
-            
-        if st.session_state.debug_log:
-            with st.expander("📜 Debug History", expanded=False):
 
-                for item in reversed(st.session_state.debug_log[-20:]):
-
-                    st.markdown(
-                f"### Turn {item['turn']} ({item['agent']})"
-            )
-
-                    st.write("User:")
-                    st.code(item["user"])
-
-                    st.write("Debug:")
-                    st.json(item["debug"])
-
-                    st.markdown("---")
+    if st.session_state.debug_log:
+        with st.expander("📜 Debug History", expanded=False):
+            for item in reversed(st.session_state.debug_log[-20:]):
+                st.markdown(f"### Turn {item['turn']} ({item['agent']})")
+                st.write("User:")
+                st.code(item["user"])
+                st.write("Debug:")
+                st.json(item["debug"])
+                st.markdown("---")
 
     st.markdown("---")
 
@@ -426,6 +395,7 @@ with st.sidebar:
             "history",
             "form",
             "last_debug",
+            "debug_log",
             "turn",
             "session_id",
         ]:
@@ -450,7 +420,6 @@ st.markdown(
 )
 
 
-# Main-page debug panel for mobile
 _render_debug_panel(st.session_state.last_debug)
 
 
@@ -476,35 +445,36 @@ if prompt := st.chat_input("Type your message..."):
                 history=st.session_state.history,
                 form=st.session_state.form,
             )
-            agent = response.agent or "system"
 
-            response.debug["agent"] = agent
-            response.debug["escalate"] = response.escalate
-            response.debug["complete"] = response.complete
-            response.debug["message_preview"] = response.message[:300]
-            response.debug["form"] = response.form
+        agent = response.agent or "system"
 
-            print("=" * 80, flush=True)
-            print("UI DEBUG RESPONSE", flush=True)
-            print("AGENT:", agent, flush=True)
-            print("ESCALATE:", response.escalate, flush=True)
-            print("COMPLETE:", response.complete, flush=True)
-            print("MESSAGE:", response.message, flush=True)
-            print(
-    "DEBUG:",
-    json.dumps(response.debug, indent=2, default=str),
-    flush=True,
-)
-            print("=" * 80, flush=True)
+        response.debug["agent"] = agent
+        response.debug["escalate"] = response.escalate
+        response.debug["complete"] = response.complete
+        response.debug["message_preview"] = response.message[:300]
+        response.debug["form"] = response.form
 
-st.session_state.debug_log.append(
-    {
-        "turn": st.session_state.turn,
-        "user": prompt,
-        "agent": agent,
-        "debug": response.debug.copy(),
-    }
-)
+        print("=" * 80, flush=True)
+        print("UI DEBUG RESPONSE", flush=True)
+        print("AGENT:", agent, flush=True)
+        print("ESCALATE:", response.escalate, flush=True)
+        print("COMPLETE:", response.complete, flush=True)
+        print("MESSAGE:", response.message, flush=True)
+        print(
+            "DEBUG:",
+            json.dumps(response.debug, indent=2, default=str),
+            flush=True,
+        )
+        print("=" * 80, flush=True)
+
+        st.session_state.debug_log.append(
+            {
+                "turn": st.session_state.turn,
+                "user": prompt,
+                "agent": agent,
+                "debug": response.debug.copy(),
+            }
+        )
 
         _render_assistant(
             _badge(agent),
