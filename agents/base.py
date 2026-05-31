@@ -2,14 +2,13 @@
 Base agent. All agents inherit from this.
 
 Handles:
-
 - Building the messages array from conversation history
 - Calling the Claude API
 - Extracting and JSON-parsing the response
 - Logging errors without crashing the app
 """
 
-from **future** import annotations
+from __future__ import annotations
 
 import json
 import logging
@@ -19,94 +18,118 @@ from typing import Any
 from config import MODEL, MAX_TOKENS, client
 from models import ConversationMessage
 
-logger = logging.getLogger(**name**)
+logger = logging.getLogger(__name__)
+
 
 class BaseAgent(ABC):
-"""
-Abstract base for all agents.
-
-```
-Subclasses implement:
-  - system_prompt (property) -> str
-  - parse_response(raw_json: dict) -> the appropriate Pydantic model
-"""
-
-@property
-@abstractmethod
-def system_prompt(self) -> str: ...
-
-@abstractmethod
-def parse_response(self, raw: dict) -> Any: ...
-
-# -- Core call ----------------------------------------------------------
-
-def _call_llm(
-    self,
-    user_message: str,
-    history: list[ConversationMessage] | None = None,
-    extra_system: str = "",
-) -> dict:
     """
-    Call the Claude API and return the parsed JSON dict.
+    Abstract base for all agents.
 
-    Args:
-        user_message:  The latest user message to send.
-        history:       Prior conversation turns (oldest first).
-        extra_system:  Optional extra instructions appended to the system prompt.
-
-    Returns:
-        Parsed JSON dict from the model's response.
-
-    Raises:
-        ValueError: if the model returns non-JSON or the call fails.
+    Subclasses implement:
+      - system_prompt (property) -> str
+      - parse_response(raw_json: dict) -> appropriate Pydantic model
     """
-    system = self.system_prompt
-    if extra_system:
-        system = f"{system}\n\n{extra_system}"
 
-    # Build messages from history + new user message
-    messages: list[dict] = []
-    for turn in (history or []):
-        messages.append({"role": turn.role, "content": turn.content})
+    @property
+    @abstractmethod
+    def system_prompt(self) -> str:
+        pass
 
-    messages.append({"role": "user", "content": user_message})
+    @abstractmethod
+    def parse_response(self, raw: dict) -> Any:
+        pass
 
-    try:
-        response = client.messages.create(
-            model=MODEL,
-            max_tokens=MAX_TOKENS,
-            system=system,
-            messages=messages,
+    def _call_llm(
+        self,
+        user_message: str,
+        history: list[ConversationMessage] | None = None,
+        extra_system: str = "",
+    ) -> dict:
+        """
+        Call the Claude API and return the parsed JSON dict.
+
+        Args:
+            user_message: Latest user message.
+            history: Previous conversation turns.
+            extra_system: Additional instructions appended to system prompt.
+
+        Returns:
+            Parsed JSON response.
+
+        Raises:
+            ValueError if response is not valid JSON.
+        """
+
+        system = self.system_prompt
+
+        if extra_system:
+            system = f"{system}\n\n{extra_system}"
+
+        messages: list[dict] = []
+
+        for turn in history or []:
+            messages.append(
+                {
+                    "role": turn.role,
+                    "content": turn.content,
+                }
+            )
+
+        messages.append(
+            {
+                "role": "user",
+                "content": user_message,
+            }
         )
-    except Exception as exc:
-        logger.error("Claude API call failed: %s", exc)
-        raise
 
-    raw_text = response.content[0].text.strip()
+        try:
+            response = client.messages.create(
+                model=MODEL,
+                max_tokens=MAX_TOKENS,
+                system=system,
+                messages=messages,
+            )
 
-    # Strip markdown fences if the model wraps output
-    if raw_text.startswith("```"):
-        raw_text = raw_text.split("\n", 1)[-1]
-        raw_text = raw_text.rsplit("```", 1)[0]
+        except Exception as exc:
+            logger.error("Claude API call failed: %s", exc)
+            raise
 
-    try:
-        return json.loads(raw_text)
-    except json.JSONDecodeError as exc:
-        logger.error("Non-JSON response from model:\n%s", raw_text)
-        raise ValueError(f"Model returned non-JSON output: {exc}") from exc
+        raw_text = response.content[0].text.strip()
 
-# -- Public interface ---------------------------------------------------
+        if raw_text.startswith("```"):
+            raw_text = raw_text.split("\n", 1)[-1]
+            raw_text = raw_text.rsplit("```", 1)[0]
 
-def run(
-    self,
-    user_message: str,
-    history: list[ConversationMessage] | None = None,
-    **kwargs,
-) -> Any:
-    """
-    Main entry point. Calls LLM and parses into the agent's output model.
-    Subclasses can override kwargs to pass extra context (e.g. BookingDetails).
-    """
-    raw = self._call_llm(user_message, history, **kwargs)
-    return self.parse_response(raw)
-```
+        try:
+            return json.loads(raw_text)
+
+        except json.JSONDecodeError as exc:
+            logger.error(
+                "Non-JSON response from model:\n%s",
+                raw_text,
+            )
+
+            raise ValueError(
+                f"Model returned non-JSON output: {exc}"
+            ) from exc
+
+    def run(
+        self,
+        user_message: str,
+        history: list[ConversationMessage] | None = None,
+        **kwargs,
+    ) -> Any:
+        """
+        Main entry point.
+
+        Calls the LLM and parses the result into the
+        agent's output model.
+        """
+
+        raw = self._call_llm(
+            user_message=user_message,
+            history=history,
+            **kwargs,
+        )
+
+        return self.parse_response(raw)
