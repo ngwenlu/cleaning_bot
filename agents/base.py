@@ -80,16 +80,29 @@ class BaseAgent(ABC):
                 model=MODEL,
                 messages=openai_messages,
                 max_completion_tokens=MAX_TOKENS,
+                response_format={"type": "json_object"},
             )
         except Exception as exc:
             logger.error("OpenAI API call failed: %s", exc)
             raise
 
-        raw_text = response.choices[0].message.content.strip()
+        choice = response.choices[0]
+        raw_text = choice.message.content
+
+        if not raw_text:
+            finish = choice.finish_reason
+            refusal = getattr(choice.message, "refusal", None)
+            detail = refusal or f"finish_reason={finish}"
+            logger.error("Empty model response: %s", detail)
+            raise ValueError(
+                f"Model returned no content ({detail}). Try rephrasing."
+            )
+
+        raw_text = raw_text.strip()
 
         if raw_text.startswith("```"):
             raw_text = raw_text.split("\n", 1)[-1]
-            raw_text = raw_text.rsplit("```", 1)[0]
+            raw_text = raw_text.rsplit("```", 1)[0].strip()
 
         try:
             return json.loads(raw_text)
