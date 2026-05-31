@@ -41,7 +41,7 @@ initial_sidebar_state=“expanded”,
 # – Custom CSS ———————————————————––
 
 st.markdown(
-“””
+"""
 <style>
 @import url(‘https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;500;600&display=swap’);
 
@@ -179,19 +179,19 @@ unsafe_allow_html=True,
 # – Session state initialisation —————————————––
 
 def _init_state():
-if “session_id” not in st.session_state:
+if "session_id" not in st.session_state:
 st.session_state.session_id = str(uuid.uuid4())
-if “messages” not in st.session_state:
+if "messages" not in st.session_state:
 # Each entry: {role, content, agent_type, metadata}
 st.session_state.messages = []
-if “history” not in st.session_state:
+if "history" not in st.session_state:
 # List[ConversationMessage] – passed to LLM
 st.session_state.history = []
-if “booking_details” not in st.session_state:
+if "booking_details" not in st.session_state:
 st.session_state.booking_details = None
-if “turn_number” not in st.session_state:
+if "turn_number" not in st.session_state:
 st.session_state.turn_number = 1
-if “last_classification” not in st.session_state:
+if "last_classification" not in st.session_state:
 st.session_state.last_classification = None
 
 _init_state()
@@ -200,33 +200,33 @@ _init_state()
 
 def _agent_badge(agent_type: AgentType | str) -> str:
 labels = {
-AgentType.BOOKING:     (“BOOKING”,    “badge-booking”),
-AgentType.FAQ:         (“FAQ”,         “badge-faq”),
-AgentType.ESCALATION:  (“URGENT”,      “badge-escalation”),
-AgentType.FOLLOW_UP:   (“FOLLOW UP”,   “badge-followup”),
-AgentType.ORCHESTRATOR:(“SYSTEM”,      “badge-system”),
+AgentType.BOOKING:     ("BOOKING",    "badge-booking"),
+AgentType.FAQ:         ("FAQ",         "badge-faq"),
+AgentType.ESCALATION:  ("URGENT",      "badge-escalation"),
+AgentType.FOLLOW_UP:   ("FOLLOW UP",   "badge-followup"),
+AgentType.ORCHESTRATOR:("SYSTEM",      "badge-system"),
 }
 key = agent_type if isinstance(agent_type, AgentType) else AgentType(agent_type)
-label, cls = labels.get(key, (“AGENT”, “badge-system”))
-return f’<span class="agent-badge {cls}">{label}</span>’
+label, cls = labels.get(key, ("AGENT", "badge-system"))
+return f'<span class="agent-badge {cls}">{label}</span>'
 
 def _render_booking_progress(bd: BookingDetails):
 fields = [
-(“Name”,          bd.customer.name),
-(“Contact”,       bd.customer.phone or bd.customer.email),
-(“Date”,          str(bd.requested_date) if bd.requested_date else None),
-(“Time”,          str(bd.requested_time) if bd.requested_time else None),
-(“Address”,       bd.address),
-(“Apt type”,      bd.apartment_type.value if bd.apartment_type else None),
-(“Hours needed”,  str(bd.hours_needed) if bd.hours_needed else None),
-(“Supplies (done)”,    “Yes” if bd.supplies_confirmed else None),
+("Name",          bd.customer.name),
+("Contact",       bd.customer.phone or bd.customer.email),
+("Date",          str(bd.requested_date) if bd.requested_date else None),
+("Time",          str(bd.requested_time) if bd.requested_time else None),
+("Address",       bd.address),
+("Apt type",      bd.apartment_type.value if bd.apartment_type else None),
+("Hours needed",  str(bd.hours_needed) if bd.hours_needed else None),
+("Supplies (done)",    "Yes" if bd.supplies_confirmed else None),
 ]
-rows = “”
+rows = ""
 filled = sum(1 for _, v in fields if v)
 for label, val in fields:
-icon = ‘<span class="check-done">O</span>’ if val else ‘<span class="check-empty">o</span>’
-display = f”<b style='color:#E8F0ED'>{val}</b>” if val else “<span style='color:#6B7280'>–</span>”
-rows += f’<div class="progress-row">{icon} <span style="flex:1">{label}</span>{display}</div>’
+icon = '<span class="check-done">O</span>' if val else '<span class="check-empty">o</span>'
+display = f"<b style='color:#E8F0ED'>{val}</b>" if val else "<span style='color:#6B7280'>–</span>"
+rows += f'<div class="progress-row">{icon} <span style="flex:1">{label}</span>{display}</div>'
 
 ```
 pct = int(filled / len(fields) * 100)
@@ -247,12 +247,12 @@ st.markdown(
 ```
 
 def _render_message(msg: dict):
-“”“Render a single stored message dict into the chat.”””
-role       = msg[“role”]
-content    = msg[“content”]
-agent_type = msg.get(“agent_type”)
-metadata   = msg.get(“metadata”, {})
-is_emergency = metadata.get(“is_emergency”, False)
+"""Render a single stored message dict into the chat."""
+role       = msg["role"]
+content    = msg["content"]
+agent_type = msg.get("agent_type")
+metadata   = msg.get("metadata", {})
+is_emergency = metadata.get("is_emergency", False)
 
 ```
 with st.chat_message(role, avatar="🧹" if role == "assistant" else "👤"):
@@ -273,13 +273,13 @@ with st.chat_message(role, avatar="🧹" if role == "assistant" else "👤"):
 
 with st.sidebar:
 st.markdown(
-“””
+"""
 <div class="company-header">
 <span class="company-icon">🧹</span>
 <span class="company-name">Dad’s Cleaning</span>
 <span class="company-tagline">PART-TIME HOME CLEANING . SINGAPORE</span>
 </div>
-“””,
+""",
 unsafe_allow_html=True,
 )
 st.markdown(”—”)
@@ -327,21 +327,15 @@ if st.button("🔄  Start new conversation", use_container_width=True):
         if key in st.session_state:
             del st.session_state[key]
     st.rerun()
-
-st.markdown(
-    "<div style='font-size:11px;color:#4A7A6E;text-align:center;margin-top:12px'>"
-    "Powered by Claude . Anthropic</div>",
-    unsafe_allow_html=True,
-)
 ```
 
 # – Main chat area ———————————————————
 
 st.markdown(
-“<h1 style='font-family:\"DM Serif Display\",serif;font-size:28px;"
+"<h1 style='font-family:\"DM Serif Display\",serif;font-size:28px;"
 "color:#1C1C1C;margin-bottom:4px'>Hi there 👋</h1>”
-“<p style='color:#6B7280;margin-top:0;margin-bottom:24px'>”
-“I can answer questions about our cleaning service or help get your booking details ready.</p>”,
+"<p style='color:#6B7280;margin-top:0;margin-bottom:24px'>"
+"I can answer questions about our cleaning service or help get your booking details ready.</p>",
 unsafe_allow_html=True,
 )
 
@@ -352,7 +346,7 @@ _render_message(msg)
 
 # – Handle new input —————————————————––
 
-if prompt := st.chat_input(“Type your message…”):
+if prompt := st.chat_input("Type your message…"):
 
 ```
 # 1. Show user message immediately
