@@ -1,7 +1,7 @@
-“””
+"""
 Static knowledge base for the FAQ Agent.
 Each entry has a key, a list of trigger topics, and the answer.
-“””
+"""
 
 from **future** import annotations
 from dataclasses import dataclass
@@ -105,7 +105,7 @@ answer=(
 ]
 
 def get_full_kb_text() -> str:
-“”“Return the full knowledge base as a formatted string for injection into prompts.”””
+"""Return the full knowledge base as a formatted string for injection into prompts."""
 lines = []
 for entry in KNOWLEDGE_BASE:
 lines.append(f”### {entry.key}”)
