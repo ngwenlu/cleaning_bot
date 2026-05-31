@@ -461,6 +461,19 @@ Return ONLY valid JSON:
 
     raw = _llm(system, history + [{"role": "user", "content": message}])
 
+    # ------------------------------------------------------------------
+    # SAFETY OVERRIDE
+    # 6pm is valid if duration allows finishing by 9pm
+    # ------------------------------------------------------------------
+
+    if (
+        clf
+        and clf.get("detected_time") == "18:00"
+        and not clf.get("time_outside_hours")
+        and not clf.get("time_too_late")
+    ):
+        raw["escalate"] = False
+
     new_collected = raw.get("collected") or {}
 
     updated_form = {
