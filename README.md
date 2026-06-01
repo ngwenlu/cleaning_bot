@@ -83,7 +83,7 @@ SALESPERSON_PHONE = "+6591234567"
 SALESPERSON_EMAIL = "sales@example.com"
 ```
 
-4. Deploy. The app is live at `https://yourapp.streamlit.app`
+4. Deploy. The app is live at `[https://yourapp.streamlit.app](https://cleaningbot-a6qgdxzpwjmtmctfkfsfyx.streamlit.app/)`
 
 ---
 
@@ -202,6 +202,3 @@ This was collapsed into a single `agents.py` because:
 Business rule validation now lives entirely in `knowledge_base.py` (for prompt
 injection) and Python datetime arithmetic (for date/time flags). This means a
 single file edit propagates everywhere without risk of validation crashes.
-
-See the `planning/` folder for full architecture docs, debugging history,
-and a detailed account of prompt failures encountered during development.
