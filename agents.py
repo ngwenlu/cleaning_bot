@@ -121,9 +121,34 @@ def classify(message: str, history: list[dict]) -> dict:
   <date_time_extraction>
     Extract detected_date and detected_time as plain strings only.
     Do NOT judge whether they are valid, past, future, or in-hours -- just extract.
-    For relative dates like "tomorrow" or "next Saturday", return the ISO date string.
-    Use today ({today.isoformat()}) as the reference for resolving relative dates.
-  </date_time_extraction>
+    For relative dates, resolve to an ISO date using today as the anchor.
+
+    <examples>
+      <!-- today is {today.isoformat()}, a {today.strftime('%A')} -->
+      <example>
+        <input>can i book today?</input>
+        <detected_date>{today.isoformat()}</detected_date>
+      </example>
+      <example>
+        <input>tomorrow morning</input>
+        <detected_date>{(today + __import__('datetime').timedelta(days=1)).isoformat()}</detected_date>
+      </example>
+      <example>
+        <input>next saturday</input>
+        <detected_date>{(today + __import__('datetime').timedelta(days=(5 - today.weekday()) % 7 or 7)).isoformat()}</detected_date>
+      </example>
+      <example>
+        <input>this sunday</input>
+        <detected_date>{(today + __import__('datetime').timedelta(days=(6 - today.weekday()) % 7 or 7)).isoformat()}</detected_date>
+      </example>
+      <example>
+        <input>next week friday</input>
+        <detected_date>{(today + __import__('datetime').timedelta(days=(4 - today.weekday()) % 7 + 7)).isoformat()}</detected_date>
+      </example>
+    </examples>
+
+    If no date is mentioned, return null.
+</date_time_extraction>
 
   <output_format>
     Return ONLY valid JSON with no preamble:
