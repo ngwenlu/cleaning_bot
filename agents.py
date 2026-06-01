@@ -1,43 +1,53 @@
 """
-agents.py – All agent logic in one place.
+agents.py -- All agent logic in one place.
+
+Business rules come entirely from knowledge_base.CONFIG.
+To change any rule, edit knowledge_base.py only.
+
+Architecture:
+  classify()        -> extracts intent + date/time strings (LLM),
+                       computes all flags via Python datetime arithmetic
+  run_booking()     -> collects booking form fields
+  run_faq()         -> answers from knowledge base
+  run_escalation()  -> human handoff
+  process_message() -> orchestrator; returns Response, never raises
 """
 
 from __future__ import annotations
 
-import ast
 import json
 import logging
-import re
 from dataclasses import dataclass, field
-from datetime import date, time, timedelta
-
-from dateutil import parser as date_parser
-from dateutil.relativedelta import relativedelta
+from datetime import date
 
 from config import (
-    CLASSIFIER_MAX_TOKENS,
-    CLASSIFIER_MODEL,
-    MAX_TOKENS,
-    MODEL,
-    SALESPERSON_EMAIL,
-    SALESPERSON_WHATSAPP,
-    client,
+    CLASSIFIER_MAX_TOKENS, CLASSIFIER_MODEL,
+    MAX_TOKENS, MODEL, SALESPERSON_EMAIL, SALESPERSON_WHATSAPP, client,
 )
 from knowledge_base import CONFIG, get_full_kb_text
 
 log = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Response -- the only data type app.py needs
+# ---------------------------------------------------------------------------
+
 @dataclass
 class Response:
-    message: str
-    agent: str = "assistant"
-    form: dict = field(default_factory=dict)
+    """Universal return type. Never raises -- always has a message."""
+    message:  str
+    agent:    str  = "assistant"
+    form:     dict = field(default_factory=dict)
     complete: bool = False
     escalate: bool = False
-    intent: str = "unknown"
-    debug: dict = field(default_factory=dict)
+    intent:   str  = "unknown"
+    debug:    dict = field(default_factory=dict)
 
+
+# ---------------------------------------------------------------------------
+# Core LLM helper
+# ---------------------------------------------------------------------------
 
 def _llm(
     system: str,
@@ -45,6 +55,7 @@ def _llm(
     model: str = MODEL,
     max_tokens: int = MAX_TOKENS,
 ) -> dict:
+    """Call the LLM, parse JSON, return {} on any failure."""
     try:
         resp = client.chat.completions.create(
             model=model,
@@ -52,268 +63,73 @@ def _llm(
             messages=[{"role": "system", "content": system}] + messages,
             response_format={"type": "json_object"},
         )
-
         content = (resp.choices[0].message.content or "").strip()
-
         if content.startswith("```"):
             content = content.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-
         return json.loads(content) if content else {}
-
     except Exception as exc:
         log.warning("LLM call failed: %s", exc)
         return {}
 
 
 def _get(raw: dict, key: str, fallback):
-    value = raw.get(key)
-    return value if value is not None else fallback
+    v = raw.get(key)
+    return v if v is not None else fallback
 
 
-def _extract_date_text(message: str) -> str | None:
-    patterns = [
-        r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b",
-        r"\b\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+\d{2,4}\b",
-        r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+\d{1,2},?\s+\d{2,4}\b",
-        r"\btoday\b",
-        r"\btomorrow\b",
-        r"\bnext\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
-    ]
+# ---------------------------------------------------------------------------
+# Intent classifier
+# ---------------------------------------------------------------------------
 
-    for pattern in patterns:
-        match = re.search(pattern, message, flags=re.IGNORECASE)
-        if match:
-            return match.group(0)
-
-    return None
-
-
-def _extract_time_text(message: str) -> str | None:
-    patterns = [
-        r"\b\d{1,2}:\d{2}\s*(?:am|pm)?\b",
-        r"\b\d{1,2}\s*(?:am|pm)\b",
-    ]
-
-    for pattern in patterns:
-        match = re.search(pattern, message, flags=re.IGNORECASE)
-        if match:
-            return match.group(0)
-
-    return None
-
-
-def _parse_date(date_text: str | None, today: date) -> date | None:
-    if not date_text:
-        return None
-
-    text = date_text.strip().lower()
-
-    if text == "today":
-        return today
-
-    if text == "tomorrow":
-        return today + timedelta(days=1)
-
-    weekdays = {
-        "monday": 0,
-        "tuesday": 1,
-        "wednesday": 2,
-        "thursday": 3,
-        "friday": 4,
-        "saturday": 5,
-        "sunday": 6,
-    }
-
-    if text.startswith("next "):
-        day_name = text.replace("next ", "").strip()
-        if day_name in weekdays:
-            target = weekdays[day_name]
-            days_ahead = (target - today.weekday()) % 7
-            if days_ahead == 0:
-                days_ahead = 7
-            return today + timedelta(days=days_ahead)
-
-    try:
-        return date_parser.parse(date_text, dayfirst=True, fuzzy=True).date()
-    except Exception:
-        return None
-
-
-def _parse_time(time_text: str | None) -> time | None:
-    if not time_text:
-        return None
-
-    try:
-        return date_parser.parse(time_text).time().replace(second=0, microsecond=0)
-    except Exception:
-        return None
-
-
-def _time_label(value) -> str:
-    try:
-        parsed = date_parser.parse(str(value)).time()
-        hour = parsed.hour
-        minute = parsed.minute
-        suffix = "am" if hour < 12 else "pm"
-        hour12 = hour % 12 or 12
-        return f"{hour12}{suffix}" if minute == 0 else f"{hour12}:{minute:02d}{suffix}"
-    except Exception:
-        return str(value)
-
-
-def _format_hours(hours) -> str:
-    try:
-        h = float(hours)
-        return f"{h:g}"
-    except Exception:
-        return str(hours)
-
-
-def _sanitize_no_confirmation_message(message: str) -> tuple[str, bool]:
-    banned_phrases = [
-        "confirmed",
-        "booking is confirmed",
-        "your booking is confirmed",
-        "your cleaning session is confirmed",
-        "confirmed for",
-        "we have confirmed",
-        "booking has been confirmed",
-    ]
-
-    lower = message.lower()
-
-    if any(phrase in lower for phrase in banned_phrases):
-        return (
-            "Thank you. I've noted your request. "
-            "A salesperson will review your details and contact you to confirm availability. "
-            "Bookings cannot be confirmed through this chatbot.",
-            True,
-        )
-
-    return message, False
-
-
-def _sanitize_no_confirmation(resp: Response) -> Response:
-    cleaned, changed = _sanitize_no_confirmation_message(resp.message)
-
-    if changed:
-        resp.message = cleaned
-        resp.complete = False
-        resp.escalate = False
-        resp.agent = "booking" if resp.agent == "escalation" else resp.agent
-        resp.debug["confirmation_removed"] = True
-
-    return resp
-
-
-def _validate_duration_against_time(form: dict) -> str | None:
-    requested_time = form.get("requested_time")
-    hours_needed = form.get("hours_needed")
-
-    if requested_time is None or hours_needed is None:
-        return None
-
-    try:
-        start = date_parser.parse(str(requested_time)).time()
-        hours = float(hours_needed)
-    except Exception:
-        return None
-
-    start_decimal = start.hour + (start.minute / 60)
-    end_decimal = start_decimal + hours
-
-    if end_decimal > CONFIG.hours.end_hour:
-        latest_start_decimal = CONFIG.hours.end_hour - hours
-        latest_hour = int(latest_start_decimal)
-        latest_minute = int(round((latest_start_decimal - latest_hour) * 60))
-
-        latest_label = _time_label(f"{latest_hour:02d}:{latest_minute:02d}")
-
-        return (
-            "The requested duration does not fit the start time. "
-            f"A {_format_hours(hours)}-hour session starting at {_time_label(str(requested_time))} "
-            f"would end after {CONFIG.hours.end_label}. "
-            f"For a {_format_hours(hours)}-hour session, the latest start time is {latest_label}. "
-            "Please choose an earlier start time or fewer hours."
-        )
-
-    return None
-
-
-def _invalid_datetime_response(clf: dict, form: dict) -> Response | None:
-    messages = []
-
-    if clf.get("date_in_past") and clf.get("detected_date"):
-        messages.append(
-            f"The requested date {clf['detected_date']} has already passed. "
-            "Please choose a future date."
-        )
-
-    if clf.get("date_too_far") and clf.get("detected_date"):
-        messages.append(
-            f"The requested date {clf['detected_date']} is too far in advance. "
-            f"We only accept bookings up to 6 months ahead, until {clf.get('max_booking_date')}. "
-            "Please choose a date within the next 6 months."
-        )
-
-    if clf.get("time_outside_hours") and clf.get("detected_time"):
-        messages.append(
-            f"The requested time {_time_label(clf['detected_time'])} is outside our service hours. "
-            f"Our service hours are {CONFIG.hours.start_label} to {CONFIG.hours.end_label}. "
-            "Please choose a time within this window."
-        )
-
-    if clf.get("time_too_late") and clf.get("detected_time"):
-        messages.append(
-            f"The requested start time {_time_label(clf['detected_time'])} is too late for the minimum booking. "
-            f"The minimum booking is {CONFIG.booking.min_hours:.0f} hours, "
-            f"and all sessions must finish by {CONFIG.hours.end_label}. "
-            f"So the latest start time for a {CONFIG.booking.min_hours:.0f}-hour session is "
-            f"{CONFIG.hours.latest_start(CONFIG.booking.min_hours)}. "
-            "Please choose an earlier start time."
-        )
-
-    if not messages:
-        return None
-
-    return Response(
-        message=" ".join(messages),
-        agent="booking",
-        form=form,
-        complete=False,
-        escalate=False,
-        debug={"blocked_by_python_validation": True},
-    )
-
-
-_CLASSIFY_SCHEMA = json.dumps(
-    {
-        "intent": "booking | faq | escalation | feedback | out_of_scope",
-        "sentiment": "positive | neutral | negative | urgent",
-        "urgency": "routine | high | critical",
-        "confidence": "float 0.0-1.0",
-        "reasoning": "one sentence",
-    },
-    indent=2,
-)
+_CLASSIFY_SCHEMA = json.dumps({
+    "intent":        "booking | faq | escalation | feedback | out_of_scope",
+    "sentiment":     "positive | neutral | negative | urgent",
+    "urgency":       "routine | high | critical",
+    "confidence":    "float 0.0-1.0",
+    "reasoning":     "one sentence",
+    "detected_date": "ISO date YYYY-MM-DD if the user mentioned any date, else null",
+    "detected_time": "24hr time HH:MM if the user mentioned any time, else null",
+}, indent=2)
 
 
 def classify(message: str, history: list[dict]) -> dict:
     today = date.today()
 
-    system = f"""You are the intent classifier for a cleaning service chatbot.
+    system = f"""<system>
+  <role>
+    Intent and sentiment classifier for a cleaning service chatbot.
+    You extract intent and any mentioned date/time strings. You do NOT compute
+    whether dates are valid -- that is handled by the application in Python.
+  </role>
 
-Today: {today.isoformat()} ({today.strftime("%A")})
+  <context>
+    <today>{today.isoformat()} ({today.strftime('%A')})</today>
+  </context>
 
+  <business_rules>
 {CONFIG.rules_for_agents()}
+  </business_rules>
 
-Classify intent and sentiment only.
-Do NOT parse, validate, or reason about dates and times.
-The Python app handles all date/time rules.
+  <intent_definitions>
+    <intent name="booking">User wants to schedule a cleaning session.</intent>
+    <intent name="faq">User has a question about the service, pricing, hours, etc.</intent>
+    <intent name="escalation">User wants to speak to a human or situation needs urgent attention.</intent>
+    <intent name="feedback">User is giving feedback or complaining about a past session.</intent>
+    <intent name="out_of_scope">Unrelated to the cleaning business.</intent>
+  </intent_definitions>
 
-Return ONLY valid JSON:
-{_CLASSIFY_SCHEMA}
-"""
+  <date_time_extraction>
+    Extract detected_date and detected_time as plain strings only.
+    Do NOT judge whether they are valid, past, future, or in-hours -- just extract.
+    For relative dates like "tomorrow" or "next Saturday", return the ISO date string.
+    Use today ({today.isoformat()}) as the reference for resolving relative dates.
+  </date_time_extraction>
+
+  <output_format>
+    Return ONLY valid JSON with no preamble:
+    {_CLASSIFY_SCHEMA}
+  </output_format>
+</system>"""
 
     raw = _llm(
         system,
@@ -322,365 +138,281 @@ Return ONLY valid JSON:
         max_tokens=CLASSIFIER_MAX_TOKENS,
     )
 
-    date_text = _extract_date_text(message)
-    time_text = _extract_time_text(message)
-
-    detected_date = _parse_date(date_text, today)
-    detected_time = _parse_time(time_text)
-
-    max_booking_date = today + relativedelta(months=6)
-
-    start_hour = CONFIG.hours.start_hour
-    end_hour = CONFIG.hours.end_hour
-    min_hours = float(CONFIG.booking.min_hours)
-    latest_start_decimal = end_hour - min_hours
-
-    delta = (detected_date - today).days if detected_date else None
-    date_text_lower = date_text.lower().strip() if date_text else ""
+    from datetime import date as _date, time as _time
 
     clf = {
-        "intent": raw.get("intent", "faq"),
-        "sentiment": raw.get("sentiment", "neutral"),
-        "urgency": raw.get("urgency", "routine"),
-        "confidence": raw.get("confidence", 0.5),
-        "reasoning": raw.get("reasoning", ""),
-        "date_text": date_text,
-        "time_text": time_text,
-        "detected_date": detected_date.isoformat() if detected_date else None,
-        "detected_time": detected_time.strftime("%H:%M") if detected_time else None,
-        "max_booking_date": max_booking_date.isoformat(),
+        "intent":        raw.get("intent", "faq"),
+        "sentiment":     raw.get("sentiment", "neutral"),
+        "urgency":       raw.get("urgency", "routine"),
+        "confidence":    raw.get("confidence", 0.5),
+        "reasoning":     raw.get("reasoning", ""),
+        "detected_date": raw.get("detected_date"),
+        "detected_time": raw.get("detected_time"),
     }
 
-    clf["date_in_past"] = detected_date is not None and delta is not None and delta < 0
+    # All datetime arithmetic in Python -- never trust LLM for this
+    today = _date.today()
+    ew     = CONFIG.booking.emergency_window_days
+    sh     = CONFIG.hours.start_hour
+    eh     = CONFIG.hours.end_hour
+    min_h  = int(CONFIG.booking.min_hours)
+    max_adv = CONFIG.booking.max_advance_days
 
-    clf["date_too_far"] = (
-        detected_date is not None
-        and detected_date > max_booking_date
+    detected_date = None
+    if clf["detected_date"]:
+        try:
+            detected_date = _date.fromisoformat(clf["detected_date"])
+        except (ValueError, TypeError):
+            pass
+
+    detected_time_obj = None
+    if clf["detected_time"]:
+        try:
+            detected_time_obj = _time.fromisoformat(clf["detected_time"])
+        except (ValueError, TypeError):
+            pass
+
+    delta = (detected_date - today).days if detected_date else None
+
+    clf["is_emergency"]       = detected_date is not None and 0 <= delta <= ew
+    clf["date_in_past"]       = detected_date is not None and delta < 0
+    clf["date_too_far"]       = detected_date is not None and delta is not None and delta > max_adv
+    clf["time_outside_hours"] = (detected_time_obj is not None
+                                 and (detected_time_obj.hour < sh
+                                      or detected_time_obj.hour >= eh))
+    clf["time_too_late"]      = (detected_time_obj is not None
+                                 and not clf["time_outside_hours"]
+                                 and detected_time_obj.hour > (eh - min_h))
+    # e.g. eh=21, min_h=3 -> threshold=18 -> hour>18 means 7pm+ is too late
+    # 6pm (hour=18) is valid: 18+3=21=9pm exactly at closing
+    clf["date_seems_wrong"]   = (
+        (clf["date_in_past"] and clf["intent"] == "booking")
+        or (detected_date is not None and delta is not None
+            and delta > ew and clf["intent"] in ("feedback", "escalation"))
     )
-
-    clf["is_emergency"] = (
-        detected_date is not None
-        and date_text_lower in {"today", "tomorrow"}
-        and not clf["date_in_past"]
-        and not clf["date_too_far"]
-    )
-
-    clf["time_outside_hours"] = (
-        detected_time is not None
-        and (
-            detected_time.hour < start_hour
-            or detected_time.hour >= end_hour
-        )
-    )
-
-    if detected_time is not None:
-        start_decimal = detected_time.hour + (detected_time.minute / 60)
-        clf["time_too_late"] = (
-            not clf["time_outside_hours"]
-            and start_decimal > latest_start_decimal
-        )
-    else:
-        clf["time_too_late"] = False
-
-    print("DEBUG CLASSIFIER:", json.dumps(clf, indent=2, default=str), flush=True)
-    log.warning("DEBUG CLASSIFIER: %s", json.dumps(clf, default=str))
-
-    clf["classifier_debug_generated"] = True
-
     return clf
 
 
-_BOOKING_REQUIRED = [
-    "customer_name",
-    "address",
-    "requested_date",
-    "requested_time",
-    "hours_needed",
-    "has_pets",
-]
+# ---------------------------------------------------------------------------
+# Booking agent
+# ---------------------------------------------------------------------------
 
+_BOOKING_REQUIRED = ["customer_name", "address", "requested_date",
+                     "requested_time", "hours_needed", "has_pets"]
 
-_BOOKING_SCHEMA = json.dumps(
-    {
-        "message": "Conversational reply to the user",
-        "collected": {
-            "customer_name": "string or null",
-            "address": "string or null",
-            "requested_date": "YYYY-MM-DD or null",
-            "requested_time": "HH:MM or null",
-            "hours_needed": "number or null",
-            "has_pets": "boolean or null",
-            "contact": "phone or email if volunteered, else null",
-            "notes": "any extra context, else null",
-        },
-        "is_complete": "true when ALL 6 required fields are filled",
-        "next_field": "next missing required field, or null",
-        "escalate": "false always",
+_BOOKING_SCHEMA = json.dumps({
+    "message":  "Conversational reply to the user",
+    "collected": {
+        "customer_name":  "string or null",
+        "address":        "string or null",
+        "requested_date": "YYYY-MM-DD or null",
+        "requested_time": "HH:MM or null",
+        "hours_needed":   "number or null",
+        "has_pets":       "boolean or null (null = not yet asked)",
+        "contact":        "phone or email if volunteered, else null",
+        "notes":          "any extra context, else null",
     },
-    indent=2,
-)
+    "is_complete": "true when ALL 6 required fields are filled",
+    "next_field":  "name of next missing required field, or null",
+    "escalate":    "true ONLY if the booking is for today or tomorrow",
+}, indent=2)
 
 
-def run_booking(
-    message: str,
-    history: list[dict],
-    form: dict,
-    clf: dict | None = None,
-) -> Response:
-    filled = {k: v for k, v in form.items() if v is not None}
+def run_booking(message: str, history: list[dict], form: dict, clf: dict | None = None) -> Response:
+    today = date.today()
+    filled  = {k: v for k, v in form.items() if v is not None}
     missing = [k for k in _BOOKING_REQUIRED if form.get(k) is None]
 
-    system = f"""You are the booking assistant for a cleaning service.
+    # Build Python-verified alerts from datetime flags
+    alerts = []
+    if clf:
+        if clf.get("date_in_past") and clf.get("detected_date"):
+            alerts.append(
+                f"The date {clf['detected_date']} has already passed "
+                f"(today is {today.isoformat()}). "
+                f"Tell the customer this date is in the past and ask for a future date."
+            )
+        if clf.get("date_too_far") and clf.get("detected_date"):
+            alerts.append(
+                f"The booking date {clf['detected_date']} is too far in advance. "
+                f"The maximum is {CONFIG.booking.max_advance_days // 30} months ahead. "
+                f"Tell the customer their booking date is too far in advance and that "
+                f"the maximum is 6 months ahead."
+            )
+        if clf.get("time_too_late") and clf.get("detected_time"):
+            alerts.append(
+                f"The start time {clf['detected_time']} is too late. "
+                f"Even the minimum {CONFIG.booking.min_hours:.0f}-hour session would run "
+                f"past {CONFIG.hours.end_label} when cleaners stop service. "
+                f"The latest start time is {CONFIG.hours.latest_start(CONFIG.booking.min_hours)}. "
+                f"Tell the customer the latest start time is "
+                f"{CONFIG.hours.latest_start(CONFIG.booking.min_hours)}."
+            )
+        if clf.get("time_outside_hours") and clf.get("detected_time"):
+            alerts.append(
+                f"The time {clf['detected_time']} is outside service hours "
+                f"({CONFIG.hours.start_label}-{CONFIG.hours.end_label}). "
+                f"Explain the service hours and ask for a valid time."
+            )
+        if clf.get("is_emergency") and clf.get("detected_date"):
+            alerts.append(
+                f"The date {clf['detected_date']} is today or tomorrow -- "
+                f"this is an emergency booking. Set escalate=true."
+            )
 
+    # Check overrun using form data: start_time + hours_needed > closing time
+    # This runs whenever both values are available (either from form or just collected)
+    check_time  = (clf.get("detected_time") or form.get("requested_time")) if clf else form.get("requested_time")
+    check_hours = form.get("hours_needed")
+    if check_time and check_hours:
+        try:
+            from datetime import datetime as _dt
+            t = _dt.strptime(str(check_time)[:5], "%H:%M")
+            end_hour_float = t.hour + t.minute / 60 + float(check_hours)
+            if end_hour_float > CONFIG.hours.end_hour:
+                end_h = int(end_hour_float)
+                end_m = int((end_hour_float - end_h) * 60)
+                end_label = f"{end_h % 12 or 12}:{end_m:02d}{'am' if end_h < 12 else 'pm'}"
+                # Only add if not already flagged by time_too_late
+                if not (clf and clf.get("time_too_late")):
+                    alerts.append(
+                        f"The time slot {check_time} for {check_hours} hours would end at "
+                        f"{end_label}, which is after {CONFIG.hours.end_label} when cleaners "
+                        f"stop service. Tell the customer their time slot would overrun 9pm "
+                        f"and ask them to choose an earlier start time or fewer hours."
+                    )
+        except (ValueError, TypeError):
+            pass
+
+    alerts_xml = ""
+    if alerts:
+        items = "\n".join(f"    <alert>{a}</alert>" for a in alerts)
+        alerts_xml = f"\n  <datetime_alerts>\n{items}\n  </datetime_alerts>"
+
+    system = f"""<system>
+  <role>
+    Booking assistant for a cleaning service.
+    Collect the required booking details conversationally, one or two fields at a time.
+    You do NOT confirm or commit to any booking -- a salesperson will follow up.
+  </role>
+
+  <context>
+    <today>{today.isoformat()} ({today.strftime('%A')})</today>
+  </context>
+
+  <business_rules>
 {CONFIG.rules_for_agents()}
+  </business_rules>
+{alerts_xml}
+  <form_state>
+    <required_fields>{_BOOKING_REQUIRED}</required_fields>
+    <already_collected>{json.dumps(filled, default=str)}</already_collected>
+    <still_missing>{missing}</still_missing>
+  </form_state>
 
-FORM STATE:
-Required fields: {_BOOKING_REQUIRED}
-Already collected: {json.dumps(filled, default=str)}
-Still missing: {missing}
+  <rules>
+    <rule>Compute relative dates yourself ("next Saturday" -> calculate from today and confirm naturally).</rule>
+    <rule>Reject and re-ask if: date is in the past, date is too far ahead, time is out of hours, or time is too late to start.</rule>
+    <rule>After collecting both requested_time and hours_needed, check if start_time + hours_needed exceeds {CONFIG.hours.end_label}. If so, tell the customer their time slot would overrun {CONFIG.hours.end_label} when cleaners stop service, and ask them to choose an earlier start time or reduce the hours.</rule>
+    <rule>When all 6 required fields are filled, say: "Thank you! I've noted everything down. Our salesperson will contact you shortly to confirm." Then set is_complete=true.</rule>
+    <rule>Set escalate=true only if the booking date is today or tomorrow.</rule>
+    <rule>NEVER say the booking is confirmed. NEVER commit to a specific cleaner or time slot.</rule>
+    <rule>If datetime_alerts are present above, address them immediately before asking for the next field.</rule>
+  </rules>
 
-CURRENT CLASSIFIER CONTEXT:
-{json.dumps(clf or {}, indent=2, default=str)}
-
-RULES:
-- Collect required booking details one or two fields at a time.
-- Never confirm or commit to a booking.
-- Never say "confirmed".
-- A salesperson must confirm all bookings.
-- If the user gives a valid date and time, continue collecting missing fields.
-- 6pm is a VALID start time for a 3-hour session because sessions end by 9pm.
-- If requested_time plus hours_needed exceeds {CONFIG.hours.end_label}, do not complete the booking.
-- Never mark is_complete=true until requested_time plus hours_needed ends by {CONFIG.hours.end_label}.
-- Always set escalate=false.
-- If all required fields are collected and time/duration is valid, say:
-  "Thank you! I've noted everything down. Our salesperson will contact you shortly to confirm."
-
-Return ONLY valid JSON:
-{_BOOKING_SCHEMA}
-"""
-
-    raw = _llm(system, history + [{"role": "user", "content": message}])
-
-    # ------------------------------------------------------------------
-    # SAFETY OVERRIDE
-    # 6pm is valid if duration allows finishing by 9pm
-    # ------------------------------------------------------------------
-
-    if (
-        clf
-        and clf.get("detected_time") == "18:00"
-        and not clf.get("time_outside_hours")
-        and not clf.get("time_too_late")
-    ):
-        raw["escalate"] = False
-
-    new_collected = raw.get("collected") or {}
-
-    updated_form = {
-        **form,
-        **{k: v for k, v in new_collected.items() if v is not None},
-    }
-
-    duration_error = _validate_duration_against_time(updated_form)
-
-    if duration_error:
-        return Response(
-            message=duration_error,
-            agent="booking",
-            form=updated_form,
-            complete=False,
-            escalate=False,
-            debug={
-                "duration_validation_failed": True,
-                "requested_time": updated_form.get("requested_time"),
-                "hours_needed": updated_form.get("hours_needed"),
-            },
-        )
-
-    message_text = _get(
-        raw,
-        "message",
-        "Sorry, I didn't catch that — could you repeat it?",
-    )
-
-    cleaned_message, confirmation_removed = _sanitize_no_confirmation_message(message_text)
-
-    resp = Response(
-        message=cleaned_message,
-        agent="booking",
-        form=updated_form,
-        complete=bool(raw.get("is_complete", False)) and not confirmation_removed,
-        escalate=False,
-        debug={
-            "next_field": raw.get("next_field"),
-            "confirmation_removed": confirmation_removed,
-        },
-    )
-
-    return resp
-
-def run_booking(
-    message: str,
-    history: list[dict],
-    form: dict,
-    clf: dict | None = None,
-) -> Response:
-    filled = {k: v for k, v in form.items() if v is not None}
-    missing = [k for k in _BOOKING_REQUIRED if form.get(k) is None]
-
-    system = f"""You are the booking assistant for a cleaning service.
-
-{CONFIG.rules_for_agents()}
-
-FORM STATE:
-Required fields: {_BOOKING_REQUIRED}
-Already collected: {json.dumps(filled, default=str)}
-Still missing: {missing}
-
-CURRENT CLASSIFIER CONTEXT:
-{json.dumps(clf or {}, indent=2, default=str)}
-
-RULES:
-- Extract any booking details the user provides.
-- Never confirm or commit to a booking.
-- Never say "confirmed".
-- A salesperson must confirm all bookings.
-- Always set escalate=false.
-- Return collected fields in JSON.
-
-Return ONLY valid JSON:
-{_BOOKING_SCHEMA}
-"""
+  <output_format>
+    Return ONLY valid JSON with no preamble:
+    {_BOOKING_SCHEMA}
+  </output_format>
+</system>"""
 
     raw = _llm(system, history + [{"role": "user", "content": message}])
 
     new_collected = raw.get("collected") or {}
-
     updated_form = {
         **form,
         **{k: v for k, v in new_collected.items() if v is not None},
     }
-
-    duration_error = _validate_duration_against_time(updated_form)
-
-    if duration_error:
-        return Response(
-            message=duration_error,
-            agent="booking",
-            form=updated_form,
-            complete=False,
-            escalate=False,
-            debug={
-                "duration_validation_failed": True,
-                "requested_time": updated_form.get("requested_time"),
-                "hours_needed": updated_form.get("hours_needed"),
-            },
-        )
-
-    missing_after = [k for k in _BOOKING_REQUIRED if updated_form.get(k) is None]
-
-    question_map = {
-        "customer_name": "Please provide your name.",
-        "address": "Please provide the cleaning address.",
-        "requested_date": "What date would you like the cleaning?",
-        "requested_time": "What start time would you prefer?",
-        "hours_needed": "How many hours do you need?",
-        "has_pets": "Do you have any pets at the property?",
-    }
-
-    if missing_after:
-        next_field = missing_after[0]
-
-        return Response(
-            message=question_map[next_field],
-            agent="booking",
-            form=updated_form,
-            complete=False,
-            escalate=False,
-            debug={
-                "next_field": next_field,
-                "missing_fields": missing_after,
-                "forced_booking_flow": True,
-            },
-        )
 
     return Response(
-        message=(
-            "Thank you! I’ve noted everything down. "
-            "Our salesperson will contact you shortly to confirm availability."
-        ),
+        message=_get(raw, "message", "Sorry, I didn't catch that -- could you repeat it?"),
         agent="booking",
         form=updated_form,
-        complete=True,
-        escalate=False,
-        debug={
-            "next_field": None,
-            "missing_fields": [],
-            "forced_booking_flow": True,
-        },
+        complete=bool(raw.get("is_complete", False)),
+        escalate=bool(raw.get("escalate", False)),
+        debug={"next_field": raw.get("next_field")},
     )
 
 
-_FAQ_SCHEMA = json.dumps(
-    {
-        "message": "Answer in plain conversational English",
-        "sources": ["list", "of", "kb", "keys", "used"],
-        "answered": "true if the KB covers the question, false otherwise",
-    },
-    indent=2,
-)
+# ---------------------------------------------------------------------------
+# FAQ agent
+# ---------------------------------------------------------------------------
+
+_FAQ_SCHEMA = json.dumps({
+    "message":  "Answer in plain conversational English",
+    "sources":  ["list", "of", "kb", "keys", "used"],
+    "answered": "true if the KB covers the question, false otherwise",
+}, indent=2)
 
 
 def run_faq(message: str, history: list[dict]) -> Response:
-    system = f"""You are the FAQ assistant for a cleaning service in Singapore.
+    system = f"""<system>
+  <role>
+    FAQ assistant for a cleaning service in Singapore.
+    Answer questions using ONLY the knowledge base provided.
+    If the question is not covered by the knowledge base, set answered=false.
+  </role>
 
-Answer ONLY using the knowledge base below.
-If the question is not covered, set answered=false.
-
+  <business_rules>
 {CONFIG.rules_for_agents()}
+  </business_rules>
 
-KNOWLEDGE BASE:
+  <knowledge_base>
 {get_full_kb_text()}
+  </knowledge_base>
 
-Return ONLY valid JSON:
-{_FAQ_SCHEMA}
-"""
+  <rules>
+    <rule>Answer only from the knowledge base. Do not invent information.</rule>
+    <rule>If the question is not covered, set answered=false and politely say you will connect them with the team.</rule>
+    <rule>Keep answers friendly and concise.</rule>
+  </rules>
+
+  <output_format>
+    Return ONLY valid JSON with no preamble:
+    {_FAQ_SCHEMA}
+  </output_format>
+</system>"""
 
     raw = _llm(system, history + [{"role": "user", "content": message}])
 
     sources = raw.get("sources", [])
-
     if isinstance(sources, str):
         try:
+            import ast
             sources = ast.literal_eval(sources)
         except Exception:
             sources = [sources] if sources else []
-
     if not isinstance(sources, list):
         sources = []
 
     answered = bool(raw.get("answered", True))
-
     return Response(
-        message=_get(
-            raw,
-            "message",
-            "Let me connect you with our team for more details.",
-        ),
+        message=_get(raw, "message", "Let me connect you with our team for more details."),
         agent="faq",
         escalate=not answered,
         debug={"sources": sources},
     )
 
 
-_ESCALATION_SCHEMA = json.dumps(
-    {
-        "message_to_user": "Empathetic reply to user",
-        "summary": "2-3 sentence summary for salesperson",
-        "urgency": "routine | high | critical",
-    },
-    indent=2,
-)
+# ---------------------------------------------------------------------------
+# Escalation agent
+# ---------------------------------------------------------------------------
+
+_ESCALATION_SCHEMA = json.dumps({
+    "message_to_user": "Empathetic reply. Emergency: reassure. Complaint: acknowledge.",
+    "summary":         "2-3 sentences for the salesperson: what happened, what the customer needs.",
+    "urgency":         "routine | high | critical",
+}, indent=2)
 
 
 def run_escalation(
@@ -688,95 +420,86 @@ def run_escalation(
     history: list[dict],
     context: dict | None = None,
 ) -> Response:
-    system = f"""You are the escalation handler for a cleaning service chatbot.
+    system = f"""<system>
+  <role>
+    Escalation handler for a cleaning service chatbot.
+    You handle: emergency bookings, complaints, unanswerable FAQs, explicit human requests.
+  </role>
 
+  <business_rules>
 {CONFIG.rules_for_agents()}
+  </business_rules>
 
-Salesperson contacts:
-WhatsApp: {SALESPERSON_WHATSAPP}
-Email: {SALESPERSON_EMAIL}
+  <salesperson_contacts>
+    <whatsapp>{SALESPERSON_WHATSAPP}</whatsapp>
+    <email>{SALESPERSON_EMAIL}</email>
+  </salesperson_contacts>
 
-Context:
-{json.dumps(context or {}, indent=2, default=str)}
+  <classifier_context>
+    {json.dumps(context or {}, indent=4, default=str)}
+  </classifier_context>
 
-RULES:
-- Never confirm bookings.
-- Never say "confirmed".
-- Emergency booking today/tomorrow: say a salesperson will WhatsApp them shortly to check availability.
-- Complaint or negative feedback: empathise and promise human follow-up. Set urgency=high.
-- Unanswerable FAQ: politely say you will connect them with the team. Set urgency=routine.
+  <rules>
+    <rule>Emergency booking (today/tomorrow): reassure the customer and say the team will WhatsApp them shortly. Set urgency=critical.</rule>
+    <rule>Complaint or negative feedback: empathise, do not argue or offer refunds, promise a human will follow up. Set urgency=high.</rule>
+    <rule>Unanswerable FAQ: politely say you will connect them with the team. Set urgency=routine.</rule>
+    <rule>Out-of-hours or invalid time: explain the service window and ask for a valid time. Do NOT treat as urgent.</rule>
+    <rule>Date mismatch (date_seems_wrong=true): point out the inconsistency clearly and ask the customer to confirm the correct date.</rule>
+    <rule>Write summary for the salesperson in plain English covering: what the customer wants, any details collected, and the sentiment.</rule>
+  </rules>
 
-Return ONLY valid JSON:
-{_ESCALATION_SCHEMA}
-"""
+  <output_format>
+    Return ONLY valid JSON with no preamble:
+    {_ESCALATION_SCHEMA}
+  </output_format>
+</system>"""
 
     raw = _llm(system, history + [{"role": "user", "content": message}])
-
-    resp = Response(
-        message=_get(
-            raw,
-            "message_to_user",
-            "I'm connecting you with our team. Someone will be in touch shortly.",
-        ),
+    return Response(
+        message=_get(raw, "message_to_user", "I'm connecting you with our team. Someone will be in touch shortly."),
         agent="escalation",
         escalate=True,
-        debug={
-            "summary": raw.get("summary"),
-            "urgency": raw.get("urgency"),
-        },
+        debug={"summary": raw.get("summary"), "urgency": raw.get("urgency")},
     )
 
-    return _sanitize_no_confirmation(resp)
 
+# ---------------------------------------------------------------------------
+# Orchestrator
+# ---------------------------------------------------------------------------
 
 def process_message(
     message: str,
     history: list[dict],
     form: dict,
 ) -> Response:
+    """
+    Single public entry point. Runs on every message.
+    NEVER raises -- always returns a Response.
+    """
     try:
-        clf = classify(message, history)
-        booking_keywords = [
-        "book",
-        "booking",
-        "cleaning",
-        "cleaner",
-        "hour",
-        "hours",
-        "am",
-        "pm",
-    ]
-
-    if any(word in message.lower() for word in booking_keywords):
-    intent = "booking"
+        clf    = classify(message, history)
         intent = clf["intent"]
 
-        invalid_resp = _invalid_datetime_response(clf, form)
+        booking_started = any(form.get(k) for k in
+            ["customer_name", "address", "requested_date", "requested_time"])
 
-        if invalid_resp is not None:
-            invalid_resp.intent = intent
-            invalid_resp.debug.update(clf)
-            return invalid_resp
+        is_emerg   = clf.get("is_emergency", False)
+        date_wrong = clf.get("date_seems_wrong", False)
 
-        booking_started = any(
-            form.get(k)
-            for k in [
-                "customer_name",
-                "address",
-                "requested_date",
-                "requested_time",
-            ]
-        )
-
-        if intent == "booking" or (booking_started and intent != "feedback"):
-            resp = run_booking(message, history, form, clf=clf)
-
-        elif intent == "escalation":
+        if is_emerg:
             resp = run_escalation(message, history, clf)
+
+        elif intent == "escalation" or (date_wrong and intent == "feedback"):
+            resp = run_escalation(message, history, clf)
+
+        elif intent == "booking" or (booking_started and intent not in ("feedback",)):
+            resp = run_booking(message, history, form, clf=clf)
+            if resp.escalate:
+                resp = run_escalation(message, history, {**clf, "form": resp.form})
+                resp.form = form
 
         elif intent in ("faq", "out_of_scope"):
             resp = run_faq(message, history)
-
             if resp.escalate:
                 resp = run_escalation(message, history, clf)
 
@@ -787,161 +510,26 @@ def process_message(
             resp = run_faq(message, history)
 
         resp.intent = intent
-
-        # ------------------------------------------------------------------
-        # Never allow booking flow to become escalation
-        # ------------------------------------------------------------------
-
-        if resp.agent == "booking":
-            resp.escalate = False
-
-        if intent == "booking":
-            resp.agent = "booking"
-            resp.escalate = False
-
-        resp.debug.update(
-            {
-                "intent": intent,
-                "agent": resp.agent,
-                "sentiment": clf.get("sentiment"),
-                "urgency": clf.get("urgency"),
-                "confidence": clf.get("confidence"),
-                "reasoning": clf.get("reasoning"),
-                "date_text": clf.get("date_text"),
-                "time_text": clf.get("time_text"),
-                "detected_date": clf.get("detected_date"),
-                "detected_time": clf.get("detected_time"),
-                "max_booking_date": clf.get("max_booking_date"),
-                "is_emergency": clf.get("is_emergency"),
-                "date_in_past": clf.get("date_in_past"),
-                "date_too_far": clf.get("date_too_far"),
-                "time_outside_hours": clf.get("time_outside_hours"),
-                "time_too_late": clf.get("time_too_late"),
-                "form": resp.form,
-            }
-        )
-
-        if resp.agent == "booking":
-            resp.escalate = False
-
-        return _sanitize_no_confirmation(resp)
+        resp.debug.update({
+            "intent":             intent,
+            "sentiment":          clf.get("sentiment"),
+            "urgency":            clf.get("urgency"),
+            "confidence":         clf.get("confidence"),
+            "reasoning":          clf.get("reasoning"),
+            "is_emergency":       clf.get("is_emergency"),
+            "date_in_past":       clf.get("date_in_past"),
+            "date_too_far":       clf.get("date_too_far"),
+            "time_outside_hours": clf.get("time_outside_hours"),
+            "time_too_late":      clf.get("time_too_late"),
+            "detected_date":      clf.get("detected_date"),
+            "detected_time":      clf.get("detected_time"),
+        })
+        return resp
 
     except Exception as exc:
         log.error("process_message crashed: %s", exc, exc_info=True)
-
         return Response(
             message="I'm sorry, I ran into a technical issue. Could you try again?",
             agent="system",
             form=form,
         )
-def process_message(
-    message: str,
-    history: list[dict],
-    form: dict,
-) -> Response:
-    try:
-        clf = classify(message, history)
-        intent = clf["intent"]
-
-        booking_started = any(
-            form.get(k)
-            for k in [
-                "customer_name",
-                "address",
-                "requested_date",
-                "requested_time",
-                "hours_needed",
-                "has_pets",
-            ]
-        )
-
-        booking_keywords = [
-            "book",
-            "booking",
-            "cleaning",
-            "cleaner",
-            "hour",
-            "hours",
-            "am",
-            "pm",
-            "today",
-            "tomorrow",
-            "next",
-            "saturday",
-            "sunday",
-            "monday",
-            "tuesday",
-            "wednesday",
-            "thursday",
-            "friday",
-        ]
-
-        if booking_started or any(word in message.lower() for word in booking_keywords):
-            intent = "booking"
-
-        invalid_resp = _invalid_datetime_response(clf, form)
-
-        if invalid_resp is not None:
-            invalid_resp.intent = intent
-            invalid_resp.agent = "booking"
-            invalid_resp.escalate = False
-            invalid_resp.debug.update(clf)
-            return invalid_resp
-
-        if intent == "booking":
-            resp = run_booking(message, history, form, clf=clf)
-
-        elif intent == "feedback":
-            resp = run_escalation(message, history, clf)
-
-        elif intent == "escalation":
-            resp = run_escalation(message, history, clf)
-
-        elif intent in ("faq", "out_of_scope"):
-            resp = run_faq(message, history)
-
-            if resp.escalate:
-                resp = run_escalation(message, history, clf)
-
-        else:
-            resp = run_faq(message, history)
-
-        if intent == "booking":
-            resp.agent = "booking"
-            resp.escalate = False
-
-        resp.intent = intent
-
-        resp.debug.update(
-            {
-                "intent": intent,
-                "agent": resp.agent,
-                "sentiment": clf.get("sentiment"),
-                "urgency": clf.get("urgency"),
-                "confidence": clf.get("confidence"),
-                "reasoning": clf.get("reasoning"),
-                "date_text": clf.get("date_text"),
-                "time_text": clf.get("time_text"),
-                "detected_date": clf.get("detected_date"),
-                "detected_time": clf.get("detected_time"),
-                "max_booking_date": clf.get("max_booking_date"),
-                "is_emergency": clf.get("is_emergency"),
-                "date_in_past": clf.get("date_in_past"),
-                "date_too_far": clf.get("date_too_far"),
-                "time_outside_hours": clf.get("time_outside_hours"),
-                "time_too_late": clf.get("time_too_late"),
-                "form": resp.form,
-            }
-        )
-
-        return _sanitize_no_confirmation(resp)
-
-    except Exception as exc:
-        log.error("process_message crashed: %s", exc, exc_info=True)
-
-        return Response(
-            message="I'm sorry, I ran into a technical issue. Could you try again?",
-            agent="system",
-            form=form,
-        )
-
