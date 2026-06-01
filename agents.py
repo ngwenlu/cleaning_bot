@@ -312,8 +312,9 @@ def run_booking(message: str, history: list[dict], form: dict, clf: dict | None 
 
   <rules>
     <rule>Compute relative dates yourself ("next Saturday" -> calculate from today and confirm naturally).</rule>
-    <rule>Reject and re-ask if: date is in the past, date is too far ahead, time is out of hours, or time is too late to start.</rule>
-    <rule>After collecting both requested_time and hours_needed, check if start_time + hours_needed exceeds {CONFIG.hours.end_label}. If so, tell the customer their time slot would overrun {CONFIG.hours.end_label} when cleaners stop service, and ask them to choose an earlier start time or reduce the hours.</rule>
+    <rule>Valid start times are 9am up to and INCLUDING 6pm. Only reject 7pm (19pm) or later.</rule>
+    <rule>6pm IS valid: 6pm + 3h minimum = 9pm exactly. Do NOT reject 6pm.</rule>
+    <rule>After collecting both requested_time and hours_needed, calculate: end_time = start_time + hours_needed. If end_time is strictly AFTER 9pm, tell the customer their time slot would overrun 9pm when cleaners stop service, and ask them to choose an earlier start time or fewer hours.</rule>
     <rule>When all 6 required fields are filled, say: "Thank you! I've noted everything down. Our salesperson will contact you shortly to confirm." Then set is_complete=true.</rule>
     <rule>Set escalate=true only if the booking date is today or tomorrow.</rule>
     <rule>NEVER say the booking is confirmed. NEVER commit to a specific cleaner or time slot.</rule>
