@@ -280,8 +280,8 @@ def classify(message: str, history: list[dict]) -> dict:
 # Booking agent
 # ---------------------------------------------------------------------------
 
-_BOOKING_REQUIRED = ["customer_name", "address", "requested_date",
-                     "requested_time", "hours_needed", "has_pets", "contact"]
+_BOOKING_REQUIRED = ["customer_name", "contact", "address", "requested_date",
+                     "requested_time", "hours_needed", "has_pets"]
 
 _BOOKING_SCHEMA = json.dumps({
     "message":  "Conversational reply to the user",
@@ -289,8 +289,8 @@ _BOOKING_SCHEMA = json.dumps({
         "customer_name":  "string or null",
         "address":        "string or null",
         "requested_date": "YYYY-MM-DD or null",
-        "requested_time": "HH:MM or null",
-        "hours_needed":   "number or null",
+        "requested_time": "HH:MM or null (null = not yet asked)",
+        "hours_needed":   "number or null (null = not yet asked)",
         "has_pets":       "boolean or null (null = not yet asked)",
         "contact":        "phone number or email address -- REQUIRED, always ask",
         "notes":          "any extra context, else null",
