@@ -130,20 +130,40 @@ def classify(message: str, history: list[dict]) -> dict:
         <detected_date>{today.isoformat()}</detected_date>
       </example>
       <example>
-        <input>tomorrow morning</input>
-        <detected_date>{(today + __import__('datetime').timedelta(days=1)).isoformat()}</detected_date>
+        <input>tomorrowy</input>
+        <today_date>02/06/2026, tuesday</today_date>
+        <new_date>03/06/2026, wednesday</new_date>
+        <reasoning>
+        tomorrow = 1 day
+        today_date_day = tuesday = 2
+        today_date_date = 02/06/2026
+        new_date_day = today_date_day + 1 = 2 + 1 + 3 + wednesday
+        new_date_date = today_date_date + days(1) = 02/06/2026 + days(1) = 03/06/2026
+        </reasoning>
       </example>
       <example>
         <input>next saturday</input>
-        <detected_date>{(today + __import__('datetime').timedelta(days=(5 - today.weekday()) % 7 or 7)).isoformat()}</detected_date>
+        <today_date>01/06/2026, monday</today_date>
+        <new_date>13/06/2026, saturday</new_date>
+        <reasoning>
+        next = 1 week = 7 days
+        today_date_day = monday = 1
+        today_date_date = 01/06/2026
+        new_date_day = saturday = 6
+        new_date_date = today_date_date + days(new_date_day - today_date_day + 7) = 01/06/2026 + days(6 - 1 + 7) = 01/06/2026 + days(12) = 13/06/2026
+        </reasoning>
       </example>
       <example>
-        <input>this sunday</input>
-        <detected_date>{(today + __import__('datetime').timedelta(days=(6 - today.weekday()) % 7 or 7)).isoformat()}</detected_date>
-      </example>
-      <example>
-        <input>next week friday</input>
-        <detected_date>{(today + __import__('datetime').timedelta(days=(4 - today.weekday()) % 7 + 7)).isoformat()}</detected_date>
+        <input>this friday</input>
+        <today_date>01/06/2026, monday</today_date>
+        <detected_date>05/06/2026, saturday</detected_date>
+        <reasoning>
+        this = + 0 weeks = 0 days
+        today_date_day = monday = 1
+        today_date_date = 01/06/2026
+        detected_date_day = friday = 5
+        detected_date_date = today_date_date + days(detected_date_day - today_date_day + 0) = 01/06/2026 + days(6 - 1 + 7) = 01/06/2026 + days(4) = 05/06/2026
+        </reasoning>
       </example>
     </examples>
 
