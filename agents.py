@@ -95,6 +95,30 @@ _CLASSIFY_SCHEMA = json.dumps({
 def classify(message: str, history: list[dict]) -> dict:
     today = date.today()
 
+    from datetime import timedelta as _td
+
+    # Pre-compute all common relative dates in Python -- LLM just looks up, never calculates
+    def _next_wd(base, wd):
+        """Date of weekday wd in the NEXT calendar week (wd: 0=Mon..6=Sun)."""
+        days_to_this = (wd - base.weekday()) % 7
+        return base + _td(days=days_to_this + 7)
+
+    def _this_wd(base, wd):
+        """Date of the coming weekday wd (never today, always 1-7 days ahead)."""
+        days = (wd - base.weekday()) % 7 or 7
+        return base + _td(days=days)
+
+    tmr         = today + _td(days=1)
+    this_sat    = _this_wd(today, 5)
+    next_sat    = _next_wd(today, 5)
+    this_sun    = _this_wd(today, 6)
+    next_sun    = _next_wd(today, 6)
+    this_mon    = _this_wd(today, 0)
+    next_mon    = _next_wd(today, 0)
+    this_fri    = _this_wd(today, 4)
+    next_fri    = _next_wd(today, 4)
+    wk2_sat     = next_sat + _td(days=7)   # "saturday after next"
+
     system = f"""<system>
   <role>
     Intent and sentiment classifier for a cleaning service chatbot.
@@ -119,57 +143,70 @@ def classify(message: str, history: list[dict]) -> dict:
   </intent_definitions>
 
   <date_time_extraction>
-    Extract detected_date and detected_time as plain strings only.
-    Do NOT judge whether they are valid, past, future, or in-hours -- just extract.
-    For relative dates, resolve to an ISO date using today as the anchor.
+    Look up the exact date from the reference table below -- do NOT calculate.
+    Return the ISO date string (YYYY-MM-DD) from the table that matches what the user said.
+
+    <reference_table>
+      today              = {today.isoformat()}  ({today.strftime('%A %d %b %Y')})
+      tomorrow           = {tmr.isoformat()}   ({tmr.strftime('%A %d %b %Y')})
+      this saturday      = {this_sat.isoformat()}   ({this_sat.strftime('%A %d %b %Y')})
+      next saturday      = {next_sat.isoformat()}   ({next_sat.strftime('%A %d %b %Y')})
+      saturday after next= {wk2_sat.isoformat()}   ({wk2_sat.strftime('%A %d %b %Y')})
+      this sunday        = {this_sun.isoformat()}   ({this_sun.strftime('%A %d %b %Y')})
+      next sunday        = {next_sun.isoformat()}   ({next_sun.strftime('%A %d %b %Y')})
+      this monday        = {this_mon.isoformat()}   ({this_mon.strftime('%A %d %b %Y')})
+      next monday        = {next_mon.isoformat()}   ({next_mon.strftime('%A %d %b %Y')})
+      this friday        = {this_fri.isoformat()}   ({this_fri.strftime('%A %d %b %Y')})
+      next friday        = {next_fri.isoformat()}   ({next_fri.strftime('%A %d %b %Y')})
+      next week          = week starting {this_mon.isoformat()}
+    </reference_table>
 
     <examples>
-      <!-- today is {today.isoformat()}, a {today.strftime('%A')} -->
-      <!-- today is {today.day}-->
       <example>
         <input>can i book today?</input>
-        <detected_date>{today.isoformat(), today.day}</detected_date>
+        <today_date>{today.strftime('%d/%m/%Y, %A').lower()}</today_date>
+        <detected_date>{today.isoformat()}</detected_date>
+        <reasoning>user said "today" -> look up today in table -> {today.isoformat()}</reasoning>
       </example>
       <example>
-        <input>tomorrowy</input>
-        <today_date>02/06/2026, tuesday</today_date>
-        <new_date>03/06/2026, wednesday</new_date>
+        <input>tomorrow morning</input>
+        <today_date>{today.strftime('%d/%m/%Y, %A').lower()}</today_date>
+        <detected_date>{tmr.isoformat()}</detected_date>
         <reasoning>
-        tomorrow = 1 day
-        today_date_day = tuesday = 2
-        today_date_date = 02/06/2026
-        new_date_day = today_date_day + 1 = 2 + 1 + 3 + wednesday
-        new_date_date = today_date_date + days(1) = 02/06/2026 + days(1) = 03/06/2026
+          user said "tomorrow" -> look up tomorrow in table
+          tomorrow = today + 1 day = {today.isoformat()} + 1 = {tmr.isoformat()} ({tmr.strftime('%A')})
         </reasoning>
       </example>
       <example>
         <input>next saturday</input>
-        <today_date>01/06/2026, monday</today_date>
-        <new_date>13/06/2026, saturday</new_date>
+        <today_date>{today.strftime('%d/%m/%Y, %A').lower()}</today_date>
+        <detected_date>{next_sat.isoformat()}</detected_date>
         <reasoning>
-        next = 1 week = 7 days
-        today_date_day = monday = 1
-        today_date_date = 01/06/2026
-        new_date_day = saturday = 6
-        new_date_date = today_date_date + days(new_date_day - today_date_day + 7) = 01/06/2026 + days(6 - 1 + 7) = 01/06/2026 + days(12) = 13/06/2026
+          user said "next saturday" -> "next" means the saturday of NEXT week, not this week
+          today = {today.strftime('%A')} = weekday {today.weekday()+1} (mon=1 ... sat=6 ... sun=7)
+          saturday = weekday 6
+          days to THIS saturday = (6 - {today.weekday()+1}) mod 7 = {(5-today.weekday())%7} days -> {this_sat.strftime('%d/%m/%Y')}
+          "next" saturday = this saturday + 7 days = {this_sat.strftime('%d/%m/%Y')} + 7 = {next_sat.strftime('%d/%m/%Y')}
+          detected_date = {next_sat.isoformat()}
         </reasoning>
       </example>
       <example>
-        <input>this friday</input>
-        <today_date>01/06/2026, monday</today_date>
-        <detected_date>05/06/2026, saturday</detected_date>
+        <input>this saturday</input>
+        <today_date>{today.strftime('%d/%m/%Y, %A').lower()}</today_date>
+        <detected_date>{this_sat.isoformat()}</detected_date>
         <reasoning>
-        this = + 0 weeks = 0 days
-        today_date_day = monday = 1
-        today_date_date = 01/06/2026
-        detected_date_day = friday = 5
-        detected_date_date = today_date_date + days(detected_date_day - today_date_day + 0) = 01/06/2026 + days(6 - 1 + 7) = 01/06/2026 + days(4) = 05/06/2026
+          user said "this saturday" -> the COMING saturday this week
+          days to this saturday = {(5-today.weekday())%7 or 7} days -> {this_sat.strftime('%d/%m/%Y')}
+          detected_date = {this_sat.isoformat()}
         </reasoning>
       </example>
     </examples>
 
+    Rule: "next [weekday]" always skips the coming occurrence and lands on the one after.
+    Rule: "this [weekday]" means the coming occurrence within this week.
+    Rule: For any date not in the table, compute from today using the same logic.
     If no date is mentioned, return null.
-</date_time_extraction>
+  </date_time_extraction>
 
   <output_format>
     Return ONLY valid JSON with no preamble:
@@ -244,7 +281,7 @@ def classify(message: str, history: list[dict]) -> dict:
 # ---------------------------------------------------------------------------
 
 _BOOKING_REQUIRED = ["customer_name", "address", "requested_date",
-                     "requested_time", "hours_needed", "has_pets"]
+                     "requested_time", "hours_needed", "has_pets", "contact"]
 
 _BOOKING_SCHEMA = json.dumps({
     "message":  "Conversational reply to the user",
@@ -255,10 +292,10 @@ _BOOKING_SCHEMA = json.dumps({
         "requested_time": "HH:MM or null",
         "hours_needed":   "number or null",
         "has_pets":       "boolean or null (null = not yet asked)",
-        "contact":        "phone or email if volunteered, else null",
+        "contact":        "phone number or email address -- REQUIRED, always ask",
         "notes":          "any extra context, else null",
     },
-    "is_complete": "true when ALL 6 required fields are filled",
+    "is_complete": "true ONLY when ALL 7 fields filled: customer_name, address, requested_date, requested_time, hours_needed, has_pets, contact",
     "next_field":  "name of next missing required field, or null",
     "escalate":    "true ONLY if the booking is for today or tomorrow",
 }, indent=2)
@@ -357,14 +394,18 @@ def run_booking(message: str, history: list[dict], form: dict, clf: dict | None 
   </form_state>
 
   <rules>
-    <rule>Compute relative dates yourself ("next Saturday" -> calculate from today and confirm naturally).</rule>
-    <rule>Valid start times are 9am up to and INCLUDING 6pm. Only reject 7pm (19pm) or later.</rule>
+    <rule>You MUST collect ALL 7 required fields. Do not mark is_complete=true until every field is filled.</rule>
+    <rule>Collect in this order: customer_name, address, requested_date, requested_time, hours_needed, has_pets, contact.</rule>
+    <rule>has_pets: always ask "Do you have any pets at the property?" -- never skip this.</rule>
+    <rule>contact: always ask for a phone number or email -- never skip this, even after other fields are done.</rule>
+    <rule>Compute relative dates from today and confirm ("Next Saturday is [date] -- is that right?").</rule>
+    <rule>Valid start times are 9am up to and INCLUDING 6pm. Only reject 7pm or later.</rule>
     <rule>6pm IS valid: 6pm + 3h minimum = 9pm exactly. Do NOT reject 6pm.</rule>
-    <rule>After collecting both requested_time and hours_needed, calculate: end_time = start_time + hours_needed. If end_time is strictly AFTER 9pm, tell the customer their time slot would overrun 9pm when cleaners stop service, and ask them to choose an earlier start time or fewer hours.</rule>
-    <rule>When all 6 required fields are filled, say: "Thank you! I've noted everything down. Our salesperson will contact you shortly to confirm." Then set is_complete=true.</rule>
+    <rule>After collecting both requested_time and hours_needed, check end_time = start + hours. If end_time is after 9pm, tell the customer their slot would overrun 9pm and ask for an earlier start or fewer hours.</rule>
+    <rule>When all 7 fields are filled, say: "Thank you! I have noted all your details. Our salesperson will be in touch to confirm availability and your booking." Then set is_complete=true.</rule>
     <rule>Set escalate=true only if the booking date is today or tomorrow.</rule>
-    <rule>NEVER say the booking is confirmed. NEVER commit to a specific cleaner or time slot.</rule>
-    <rule>If datetime_alerts are present above, address them immediately before asking for the next field.</rule>
+    <rule>NEVER confirm a booking or check availability. This chatbot only collects details.</rule>
+    <rule>If datetime_alerts are present above, address them before continuing to the next field.</rule>
   </rules>
 
   <output_format>
