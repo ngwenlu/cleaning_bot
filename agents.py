@@ -125,9 +125,10 @@ def classify(message: str, history: list[dict]) -> dict:
 
     <examples>
       <!-- today is {today.isoformat()}, a {today.strftime('%A')} -->
+      <!-- today is {today.day}-->
       <example>
         <input>can i book today?</input>
-        <detected_date>{today.isoformat()}</detected_date>
+        <detected_date>{today.isoformat(), today.day}</detected_date>
       </example>
       <example>
         <input>tomorrowy</input>
