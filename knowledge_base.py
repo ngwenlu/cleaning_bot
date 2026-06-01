@@ -125,6 +125,10 @@ CANCELLATION POLICY:
   Late fee        : {c.late_fee_pct}% of session cost if cancelled with less than {c.notice_hours}h notice
 
 BOOKING RULES:
+  Chatbot role       : This chatbot can ONLY collect booking details. It CANNOT check
+                       availability, confirm bookings, or assign cleaners. A human
+                       salesperson will review the details and follow up with the customer
+                       to confirm. Always make this clear when collecting details.
   Emergency booking  : any session for today or within the next {b.emergency_window_days} day(s)
   Minimum hours      : {b.min_hours:.0f} hours per session
   Maximum hours      : {b.max_hours:.0f} hours per session
